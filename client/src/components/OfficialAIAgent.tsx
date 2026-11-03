@@ -10,16 +10,16 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
  * scrolling through multiple screens.
  * 
  * It summarizes: trust score, OCR match/mismatch, verification history,
- * applicant details, document status, and gives role-specific recommendations.
+ * recorded application details, process guidance, and role-specific checklists.
  * 
  * HOW IT WORKS:
  *   1. The component receives the full `application` object (already loaded by dashboard)
- *   2. When user asks a question, it POSTs { application, question, officialDesignation }
+ *   2. When user asks a question, it POSTs { receiptNumber, question }
  *      to /api/ai-agent/summarize
  *   3. The API routes the question to the right analysis generator
- *   4. Returns a rich markdown response rendered in the chat
+ *   4. The API authenticates the official and reads current application data
  * 
- * NO extra blockchain/API calls — uses data already on screen.
+ * This assistant is read-only and cannot invoke workflow actions.
  */
 
 interface Message {
@@ -43,13 +43,18 @@ const QUICK_ACTIONS = [
   { label: '📊 Trust Score', question: 'Analyze the trust score for this application', icon: '📊' },
   { label: '🔍 OCR Analysis', question: 'Show me the OCR match/mismatch analysis', icon: '🔍' },
   { label: '📜 History', question: 'Show the verification history timeline', icon: '📜' },
-  { label: '📄 Documents', question: 'What is the document and security status?', icon: '📄' },
+  { label: '📄 Required documents', question: 'Which documents are required?', icon: '📄' },
+  { label: '🔗 DigiLocker', question: 'How does the applicant link DigiLocker?', icon: '🔗' },
+  { label: '➡️ Process steps', question: 'Explain the process and next step', icon: '➡️' },
   { label: '🎯 What should I do?', question: 'What do you recommend I do with this application?', icon: '🎯' },
 ];
 
 // Renders markdown-like text to HTML for chat bubbles
 function renderMarkdown(text: string): string {
   return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
     // Tables — convert markdown tables to HTML
     .replace(/\|(.+)\|\n\|[-| ]+\|\n((?:\|.+\|\n?)*)/g, (_, header, body) => {
       const headers = header.split('|').filter((h: string) => h.trim()).map((h: string) =>
@@ -104,7 +109,7 @@ export default function OfficialAIAgent({ application, officialDesignation, offi
       setMessages([{
         id: 'welcome',
         role: 'system',
-        content: `🤖 **AI Assistant Active** — Hello, ${officialName}!\n\nI'm your AI assistant for application **${application?.receiptNumber || 'N/A'}** by **${applicantName}**.\n\nI can help you with:\n- **Full Summary** — One-paragraph application overview\n- **Trust Score** — M8 Trust Indexer breakdown\n- **OCR Analysis** — Document field match/mismatch\n- **Verification History** — Who did what and when\n- **Recommendations** — Role-specific advice for ${officialDesignation}\n\nAsk me anything or use the quick actions below! 👇`,
+        content: `🤖 **Read-only assistant** — Hello, ${officialName}!\n\nI can summarize application **${application?.receiptNumber || 'N/A'}** for **${applicantName}**, explain the recorded trust indicators and history, and answer process and DigiLocker questions. OCR results are reported only when recorded.\n\nUse the quick actions or ask a question. I cannot submit, verify, forward, approve, reject, or change records.`,
         timestamp: new Date(),
       }]);
     }
@@ -136,11 +141,7 @@ export default function OfficialAIAgent({ application, officialDesignation, offi
       const response = await fetch('/api/ai-agent/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          application,
-          question,
-          officialDesignation,
-        }),
+        body: JSON.stringify({ receiptNumber: application?.receiptNumber, question }),
       });
 
       const data = await response.json();
@@ -195,7 +196,7 @@ export default function OfficialAIAgent({ application, officialDesignation, offi
             <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-slate-900 animate-pulse" />
           </div>
           <div>
-            <h3 className="text-white font-bold text-sm">AI Application Assistant</h3>
+            <h3 className="text-white font-bold text-sm">Read-only Application Assistant</h3>
             <p className="text-amber-300/60 text-[11px]">{officialDesignation} · {application?.receiptNumber || 'N/A'}</p>
           </div>
         </div>
@@ -277,6 +278,10 @@ export default function OfficialAIAgent({ application, officialDesignation, offi
               </div>
             ))}
             <div ref={messagesEndRef} />
+          </div>
+
+          <div className="px-4 py-2 text-xs text-amber-200/70 bg-amber-500/5 border-t border-white/5">
+            Read only: this assistant cannot submit, verify, forward, approve, reject, or change application records.
           </div>
 
           {/* Quick Actions */}
