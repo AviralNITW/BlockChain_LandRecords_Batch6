@@ -2,42 +2,40 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/db/connect';
 import DigiLockerRequest from '@/lib/models/DigiLockerRequest';
 import DigiLockerVault from '@/lib/models/DigiLockerVault';
+import LandRequest from '@/lib/models/LandRequest';
+import User from '@/lib/models/User';
 import crypto from 'crypto';
+import { getCurrentUser } from '@/lib/utils/auth';
 
 async function uploadToIPFS(fileData: string, fileName: string): Promise<{ ipfsHash: string; contentHash: string }> {
-  const pinataApiKey = process.env.PINATA_API_KEY || '';
-  const pinataSecretKey = process.env.PINATA_SECRET_KEY || '';
+  const pinataApiKey = process.env.PINATA_API_KEY;
+  const pinataSecretKey = process.env.PINATA_SECRET_KEY;
+  if (!pinataApiKey || !pinataSecretKey) {
+    throw new Error('Pinata is not configured. Set PINATA_API_KEY and PINATA_SECRET_KEY on the server.');
+  }
   const base64Data = fileData.includes(',') ? fileData.split(',')[1] : fileData;
   const buffer = Buffer.from(base64Data, 'base64');
 
   // Calculate SHA-256 Hash for M7 integrity check
   const contentHash = crypto.createHash('sha256').update(buffer).digest('hex');
 
-  const boundary = '----FormBoundary' + Math.random().toString(36).slice(2);
-  const metaStr = JSON.stringify({ name: fileName });
-
-  const bodyParts: Buffer[] = [];
-  bodyParts.push(Buffer.from(
-    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: application/pdf\r\n\r\n`
-  ));
-  bodyParts.push(buffer);
-  bodyParts.push(Buffer.from(
-    `\r\n--${boundary}\r\nContent-Disposition: form-data; name="pinataMetadata"\r\n\r\n${metaStr}\r\n--${boundary}--\r\n`
-  ));
-  const body = Buffer.concat(bodyParts);
+  const formData = new FormData();
+  formData.append('file', new Blob([buffer], { type: 'application/pdf' }), fileName || 'document.pdf');
+  formData.append('pinataMetadata', JSON.stringify({ name: fileName || 'document.pdf' }));
 
   const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
     method: 'POST',
     headers: {
-      'Content-Type': `multipart/form-data; boundary=${boundary}`,
       'pinata_api_key': pinataApiKey,
       'pinata_secret_api_key': pinataSecretKey,
     },
-    body: body
+    body: formData
   });
 
-  const data = await response.json();
-  if (!data.IpfsHash) throw new Error('Pinata error: ' + JSON.stringify(data));
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.IpfsHash) {
+    throw new Error(`Pinata upload failed (${response.status}): ${data.error || data.message || 'Check Pinata credentials and pinFileToIPFS permission.'}`);
+  }
   return { ipfsHash: data.IpfsHash, contentHash };
 }
 
@@ -61,6 +59,10 @@ async function recordOnBlockchain(ipfsHash: string, contentHash: string, request
 export async function POST(req: NextRequest) {
   try {
     await connectDB();
+    const session = await getCurrentUser();
+    if (!session || session.userType !== 'user' || !session.userId) {
+      return NextResponse.json({ error: 'Sign in as the citizen who received this request' }, { status: 401 });
+    }
     const { requestId, action } = await req.json();
 
     if (!requestId || !action || !['approved', 'rejected'].includes(action)) {
@@ -70,6 +72,14 @@ export async function POST(req: NextRequest) {
     const request = await DigiLockerRequest.findById(requestId);
     if (!request) {
       return NextResponse.json({ error: 'Request not found' }, { status: 404 });
+    }
+
+    const user = await User.findById(session.userId).select('email');
+    if (!user?.email || user.email.toLowerCase() !== request.citizenEmail.toLowerCase()) {
+      return NextResponse.json({ error: 'This document request belongs to a different citizen account' }, { status: 403 });
+    }
+    if (request.status !== 'pending') {
+      return NextResponse.json({ error: `This request has already been ${request.status}` }, { status: 409 });
     }
 
     if (action === 'rejected') {
@@ -83,13 +93,7 @@ export async function POST(req: NextRequest) {
 
     // action === 'approved'
     // Step 1: Get document from vault
-    const vault = await DigiLockerVault.findOne({
-      citizenAadhar: { $exists: true },
-      documentType: request.documentType
-    });
-
-    // Find vault by aadhar (from land request)
-    const landRequest = await (await import('@/lib/models/LandRequest')).default.findOne({
+    const landRequest = await LandRequest.findOne({
       receiptNumber: request.applicationId
     });
     const aadhar = landRequest?.aadharNumber || '';
@@ -102,21 +106,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Document not found in vault' }, { status: 404 });
     }
 
-    // Step 2: Upload to IPFS and Generate Integrity Hash
-    let ipfsHash = '';
-    let contentHash = '';
-    try {
-      const result = await uploadToIPFS(vaultDoc.fileData, vaultDoc.fileName);
-      ipfsHash = result.ipfsHash;
-      contentHash = result.contentHash;
-
-      // Save hashes back to vault for M7 accountability
-      vaultDoc.ipfsHash = ipfsHash;
-      vaultDoc.docHash = contentHash;
-      await vaultDoc.save();
-    } catch (err) {
-      console.error('IPFS upload/hash failed:', err);
-      return NextResponse.json({ error: 'Failed to secure document to IPFS' }, { status: 500 });
+    // Step 2: Upload once and reuse the CID if a previous approval attempt
+    // completed the Pinata upload but failed later in the workflow.
+    let ipfsHash = vaultDoc.ipfsHash || '';
+    let contentHash = vaultDoc.docHash || '';
+    if (!ipfsHash || !contentHash) {
+      try {
+        const result = await uploadToIPFS(vaultDoc.fileData, vaultDoc.fileName);
+        ipfsHash = result.ipfsHash;
+        contentHash = result.contentHash;
+        vaultDoc.ipfsHash = ipfsHash;
+        vaultDoc.docHash = contentHash;
+        await vaultDoc.save();
+      } catch (err) {
+        console.error('IPFS upload/hash failed:', err);
+        return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to secure document to IPFS' }, { status: 500 });
+      }
     }
 
     // Step 3: Record on blockchain (including the new contentHash)
@@ -140,6 +145,12 @@ export async function POST(req: NextRequest) {
       },
       { new: true }
     );
+
+    if (landRequest) {
+      landRequest.ipfsHash = ipfsHash;
+      landRequest.docHash = contentHash;
+      await landRequest.save();
+    }
 
     console.log('\n==========================================');
     console.log('M7 SECURITY GATEWAY: HASH GENERATED');

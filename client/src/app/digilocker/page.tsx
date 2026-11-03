@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 interface VaultDoc {
   _id: string;
   documentType: 'aadhaar_card' | 'land_deed';
-  ipfsHash: string;
+  ipfsHash?: string;
   fileName: string;
   isVerified: boolean;
   verifiedAt: string;
@@ -28,14 +28,33 @@ export default function CitizenDigiLocker() {
   const [message, setMessage] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [actionMsg, setActionMsg] = useState('');
+  const [respondingId, setRespondingId] = useState<string | null>(null);
 
   useEffect(() => { fetchAll(); }, []);
+
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      try {
+        const response = await fetch('/api/digilocker/request', { credentials: 'include', cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json();
+        setRequests((data.requests || []).filter((request: PendingRequest) => request.status === 'pending'));
+      } catch {
+        // Keep the last loaded request list if a background refresh is interrupted.
+      }
+    }, 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   const fetchAll = async () => {
     try {
       setLoading(true);
       const profileRes = await fetch('/api/users/profile');
       const profileData = await profileRes.json();
+      if (!profileRes.ok) {
+        setMessage(profileData.error || 'Please sign in to view DigiLocker requests');
+        return;
+      }
       if (!profileData.user?.aadhar) {
         setMessage('No Aadhaar number found in your profile');
         return;
@@ -47,14 +66,13 @@ export default function CitizenDigiLocker() {
       const data = await res.json();
       if (data.success) setDocs(data.data);
 
-      // Fetch pending requests by email
-      if (profileData.user.email) {
-        const reqRes = await fetch(`/api/digilocker/request?citizenEmail=${profileData.user.email}`);
-        const reqData = await reqRes.json();
-        if (reqData.requests) setRequests(reqData.requests.filter((r: PendingRequest) => r.status === 'pending'));
-      }
+      // The server derives the citizen email from the authenticated session.
+      const reqRes = await fetch('/api/digilocker/request', { credentials: 'include', cache: 'no-store' });
+      const reqData = await reqRes.json();
+      if (!reqRes.ok) throw new Error(reqData.message || 'Could not load document requests');
+      if (reqData.requests) setRequests(reqData.requests.filter((r: PendingRequest) => r.status === 'pending'));
     } catch (err) {
-      setMessage('Failed to load documents');
+      setMessage(err instanceof Error ? err.message : 'Failed to load documents');
     } finally {
       setLoading(false);
     }
@@ -62,17 +80,23 @@ export default function CitizenDigiLocker() {
 
   const handleRespond = async (requestId: string, action: 'approved' | 'rejected') => {
     try {
+      setRespondingId(requestId);
+      setActionMsg('');
       const res = await fetch('/api/digilocker/respond', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ requestId, action })
       });
       const data = await res.json();
-      setActionMsg(action === 'approved' ? '✅ Access granted to official!' : '❌ Request rejected.');
-      setRequests(prev => prev.filter(r => r._id !== requestId));
+      if (!res.ok) throw new Error(data.error || 'Could not respond to request');
+      setActionMsg(action === 'approved' ? `✅ ${data.message || 'Document secured to IPFS and access granted.'}` : 'Request rejected.');
+      await fetchAll();
       setTimeout(() => setActionMsg(''), 4000);
-    } catch {
-      setActionMsg('Failed to respond');
+    } catch (error) {
+      setActionMsg(error instanceof Error ? `❌ ${error.message}` : '❌ Failed to respond');
+    } finally {
+      setRespondingId(null);
     }
   };
 
@@ -114,13 +138,15 @@ export default function CitizenDigiLocker() {
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button
                       onClick={() => handleRespond(req._id, 'approved')}
-                      style={{ background: '#16a34a', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
+                      disabled={respondingId === req._id}
+                      style={{ background: '#16a34a', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: respondingId === req._id ? 'wait' : 'pointer', opacity: respondingId === req._id ? 0.65 : 1, fontWeight: 'bold', fontSize: '13px' }}
                     >
-                      ✅ Approve
+                      {respondingId === req._id ? 'Processing…' : '✅ Approve'}
                     </button>
                     <button
                       onClick={() => handleRespond(req._id, 'rejected')}
-                      style={{ background: '#dc2626', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
+                      disabled={respondingId === req._id}
+                      style={{ background: '#dc2626', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: respondingId === req._id ? 'wait' : 'pointer', opacity: respondingId === req._id ? 0.65 : 1, fontWeight: 'bold', fontSize: '13px' }}
                     >
                       ❌ Reject
                     </button>
@@ -141,9 +167,7 @@ export default function CitizenDigiLocker() {
         <div style={{ background: '#1e3a8a22', border: '1px solid #1e40af', borderRadius: '12px', padding: '16px', marginBottom: '24px' }}>
           <div style={{ fontWeight: 'bold', color: '#38bdf8', marginBottom: '6px' }}>ℹ️ About DigiLocker</div>
           <div style={{ fontSize: '13px', color: '#94a3b8' }}>
-            These documents have been verified and uploaded by the Government Authority.
-            They are stored on IPFS (decentralized storage) and cannot be tampered with.
-            Use these documents when applying for land registration.
+            Documents are stored in your DigiLocker vault. When you approve an official’s request, the requested document is uploaded to IPFS and its link becomes available here.
           </div>
         </div>
 
@@ -167,20 +191,20 @@ export default function CitizenDigiLocker() {
               </div>
               <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '8px' }}>📄 {doc.fileName}</div>
               <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px', wordBreak: 'break-all' }}>
-                🔗 IPFS: <span style={{ color: '#38bdf8' }}>{doc.ipfsHash}</span>
+                {doc.ipfsHash ? <>🔗 IPFS: <span style={{ color: '#38bdf8' }}>{doc.ipfsHash}</span></> : '🔐 Stored in DigiLocker vault; not yet uploaded to IPFS'}
               </div>
               <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '16px' }}>
                 🕐 Verified: {new Date(doc.verifiedAt).toLocaleDateString('en-IN')}
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <a href={`https://gateway.pinata.cloud/ipfs/${doc.ipfsHash}`} target="_blank"
+                {doc.ipfsHash && <a href={`https://gateway.pinata.cloud/ipfs/${doc.ipfsHash}`} target="_blank" rel="noreferrer"
                   style={{ flex: 1, background: '#1e40af', color: 'white', padding: '8px', borderRadius: '8px', textDecoration: 'none', textAlign: 'center', fontSize: '13px' }}>
                   👁️ View
-                </a>
-                <a href={`https://gateway.pinata.cloud/ipfs/${doc.ipfsHash}`} download
+                </a>}
+                {doc.ipfsHash && <a href={`https://gateway.pinata.cloud/ipfs/${doc.ipfsHash}`} download
                   style={{ flex: 1, background: '#334155', color: 'white', padding: '8px', borderRadius: '8px', textDecoration: 'none', textAlign: 'center', fontSize: '13px' }}>
                   ⬇️ Download
-                </a>
+                </a>}
               </div>
             </div>
           ))}

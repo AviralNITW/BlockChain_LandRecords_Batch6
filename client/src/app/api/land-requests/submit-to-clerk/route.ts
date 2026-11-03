@@ -37,22 +37,16 @@ export async function POST(req: NextRequest) {
 
     console.log('Land request found:', landRequest._id);
 
-    // Find the first clerk official
-    let clerkOfficial = await Official.findOne({ designation: 'clerk' });
+    // Match both canonical `clerk` and legacy labels such as `Clerk` or
+    // `Registration Clerk` without creating an invalid placeholder account.
+    const clerkOfficial = await Official.findOne({
+      designation: { $regex: 'clerk', $options: 'i' },
+    }).sort({ createdAt: 1 });
     if (!clerkOfficial) {
-      console.log('No clerk found, creating default clerk...');
-      // Create a default clerk if none exists
-      const defaultClerk = new Official({
-        firstName: 'System',
-        lastName: 'Clerk',
-        email: 'clerk@system.local',
-        phone: '0000000000',
-        designation: 'clerk',
-        officeId: 'default-office',
-      });
-      await defaultClerk.save();
-      console.log('Created default clerk:', defaultClerk._id);
-      clerkOfficial = defaultClerk;
+      return NextResponse.json(
+        { message: 'No Clerk account is registered yet. Ask an administrator to register a Clerk official, then submit this application again.' },
+        { status: 409 }
+      );
     }
 
     console.log('Found clerk official:', clerkOfficial._id, clerkOfficial.firstName, clerkOfficial.lastName);

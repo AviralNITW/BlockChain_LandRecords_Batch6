@@ -81,8 +81,9 @@ export default function ReceiptPage() {
         body: JSON.stringify({ receiptNumber }),
       });
 
+      const result = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error('Failed to submit');
+        throw new Error(result.message || 'Failed to submit application to Clerk');
       }
 
       // Show success and redirect

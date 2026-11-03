@@ -30,7 +30,7 @@ export default function DigiLockerRequestPanel({ aadharNumber, receiptNumber, of
       if (data.requests && data.requests.length > 0) {
         const req = data.requests[0];
         if (req.status === 'pending') setStatus('sent');
-        else if (req.status === 'approved') { setStatus('approved'); setIpfsHash(req.ipfsHash); }
+        else if (req.status === 'approved' && req.ipfsHash) { setStatus('approved'); setIpfsHash(req.ipfsHash); }
         else if (req.status === 'rejected') setStatus('rejected');
       }
     } catch (e) {}
@@ -43,17 +43,18 @@ export default function DigiLockerRequestPanel({ aadharNumber, receiptNumber, of
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          aadharNumber,
           receiptNumber,
-          officialId,
-          officialName,
-          designation,
           documentType: 'land_deed'
         })
       });
       const data = await res.json();
-      if (res.ok || res.status === 200) {
-        setStatus('sent');
+      if (res.ok) {
+        if (data.request?.status === 'approved' && data.request.ipfsHash) {
+          setStatus('approved');
+          setIpfsHash(data.request.ipfsHash);
+        } else {
+          setStatus('sent');
+        }
         setMessage(data.message);
       } else {
         setStatus('error');

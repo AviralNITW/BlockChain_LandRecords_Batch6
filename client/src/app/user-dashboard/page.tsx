@@ -219,12 +219,13 @@ export default function UserDashboard() {
       ...prev,
       [name]: value,
     }));
-    setErrors((prev) => ({ ...prev, [name]: '' }));
+    setErrors((prev) => ({ ...prev, [name]: '', submit: '' }));
   };
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
+    console.log('Validation errors1:', newErrors);
     if (!selectedDigiDoc) newErrors.pdf = "Please select a document from DigiLocker";
     if (!userData?.firstName || !userData?.lastName) newErrors.fullName = 'Full name is required';
     if (!userData?.email) newErrors.email = 'Email is required';
@@ -237,10 +238,16 @@ export default function UserDashboard() {
     if (!formData.state.trim()) newErrors.state = 'State is required';
     if (!formData.city.trim()) newErrors.city = 'City is required';
     if (!formData.pincode.trim()) newErrors.pincode = 'Pincode is required';
-    if (!/^\d{6}$/.test(formData.pincode.replace(/\D/g, ''))) newErrors.pincode = 'Pincode must be 6 digits';
+    if (!/^\d{6}$/.test(formData.pincode.trim())) newErrors.pincode = 'Pincode must be exactly 6 digits';
     if (!formData.ownerName.trim()) newErrors.ownerName = 'Owner name is required';
 
-    setErrors(newErrors);
+    const validationMessage = Object.values(newErrors).length
+      ? `Please fix the following before submitting: ${Object.values(newErrors).join('; ')}`
+      : '';
+    setErrors({ ...newErrors, submit: validationMessage });
+
+    console.log('Validation errors2:', newErrors);
+
     return Object.keys(newErrors).length === 0;
   };
 
@@ -303,7 +310,7 @@ export default function UserDashboard() {
     }
 
     if (!validateForm()) {
-      console.log('Form validation failed');
+      console.warn('Land request validation failed. Check the form for required fields.');
       return;
     }
 
@@ -318,7 +325,6 @@ export default function UserDashboard() {
       console.log('DigiLocker document selected:', selectedDigiDoc.fileName);
       setUploadProgress(60);
 
-      console.log('Creating land request...', { formData, userData });
       const response = await fetch('/api/land-requests/create', {
         method: 'POST',
         headers: {
@@ -706,7 +712,10 @@ export default function UserDashboard() {
                   {digiLockerDocs.map((doc: any) => (
                     <div
                       key={doc._id}
-                      onClick={() => setSelectedDigiDoc(doc)}
+                      onClick={() => {
+                        setSelectedDigiDoc(doc);
+                        setErrors((prev) => ({ ...prev, pdf: '', submit: '' }));
+                      }}
                       style={{ cursor: 'pointer' }}
                       className={`rounded-xl p-4 border-2 transition-all ${selectedDigiDoc?._id === doc._id ? 'border-purple-500 bg-purple-50' : 'border-slate-200 bg-white hover:border-purple-300'}`}
                     >
