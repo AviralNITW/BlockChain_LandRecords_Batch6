@@ -1,17 +1,63 @@
+# Dependencies
 node_modules/
+*/node_modules/
+client/node_modules/
+fabric-api/node_modules/
+
+# Next.js & Build Outputs
 .next/
-*.log
+*/.next/
+client/.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Environment & Secret Credentials (NEVER COMMIT)
+.env
+.env.*
+*.env
+client/.env
+client/.env.local
+client/.env.*
+fabric-api/.env
+fabric-api/.env.*
+
+# Cryptographic Keys, Certificates & Wallets
 wallets/
+*/wallets/
 fabric-api/wallets/
 fabric-api/src/wallets/
+*.pem
+*.key
+*.id
+*.crt
+temp_ca.crt
+
+# Hyperledger Fabric Network & Ledger State Artifacts
 fabric-samples/test-network/organizations/
 fabric-samples/test-network/channel-artifacts/
 fabric-samples/bin/
 fabric-samples/config/
-*.zip
-*.tar.gz
 *.pb
 *.block
+*.tar.gz
+*.zip
+
+# Sync Backups & Temporary Files
+.sync-backup*
+*.bak
+*.backup
 setup_debug.log
-temp_ca.crt
-${config_path}
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*:Zone.Identifier
+
+# OS & Editor Metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
