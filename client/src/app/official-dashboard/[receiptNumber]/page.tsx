@@ -2,7 +2,27 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { FaArrowLeft, FaUser, FaMapMarkedAlt, FaHome, FaClock, FaFileAlt, FaCheckCircle, FaExclamationTriangle, FaShieldAlt } from 'react-icons/fa';
+import {
+  FaArrowLeft,
+  FaUser,
+  FaMapMarkedAlt,
+  FaHome,
+  FaClock,
+  FaFileAlt,
+  FaCheckCircle,
+  FaTimesCircle,
+  FaExclamationTriangle,
+  FaShieldAlt,
+  FaRobot,
+  FaBrain,
+  FaCopy,
+  FaCheck,
+  FaExternalLinkAlt,
+  FaEye,
+  FaTimes,
+  FaSpinner,
+  FaPaperclip,
+} from 'react-icons/fa';
 import SuperintendentFields, { type SuperintendentFieldsHandle } from '@/components/roleFields/SuperintendentFields';
 import ProjectOfficerFields, { type ProjectOfficerFieldsHandle } from '@/components/roleFields/ProjectOfficerFields';
 import RevenueInspectorFields, { type RevenueInspectorFieldsHandle } from '@/components/roleFields/RevenueInspectorFields';
@@ -64,6 +84,46 @@ interface Application {
   }>;
 }
 
+const WORKFLOW_STAGES = [
+  { id: 'submitted', label: 'Citizen Submission' },
+  { id: 'clerk', label: 'Clerk Review' },
+  { id: 'revenue', label: 'Revenue Verification' },
+  { id: 'mro', label: 'MRO Endorsement' },
+  { id: 'collector', label: 'Collector Order' },
+  { id: 'completed', label: 'Digital Patta Issued' },
+];
+
+function getStageIndex(status: string): number {
+  const s = (status || '').toLowerCase();
+  if (s === 'completed') return 5;
+  if (s.includes('collector') || s === 'approved') return 4;
+  if (s.includes('mro')) return 3;
+  if (s.includes('revenue') || s.includes('surveyor') || s.includes('vro') || s.includes('superintendent') || s.includes('project')) return 2;
+  if (s.includes('clerk')) return 1;
+  return 0;
+}
+
+function CopyPill({ text, label }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-all font-mono"
+      title={`Copy ${label || text}`}
+    >
+      {copied ? <FaCheck className="text-emerald-400 text-[10px]" /> : <FaCopy className="text-slate-400 text-[10px]" />}
+      <span>{copied ? 'Copied' : text}</span>
+    </button>
+  );
+}
+
 export default function ApplicationDetailsPage() {
   const params = useParams();
   const router = useRouter();
@@ -78,6 +138,20 @@ export default function ApplicationDetailsPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showTrustAgent, setShowTrustAgent] = useState(false);
   const [showAIAgent, setShowAIAgent] = useState(false);
+  const [previewDocUrl, setPreviewDocUrl] = useState<string | null>(null);
+  const [pattaLoading, setPattaLoading] = useState(false);
+
+  // Modern Toast notification state
+  const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' | 'info' }>({
+    show: false,
+    message: '',
+    type: 'info',
+  });
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ show: true, message, type });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+  };
 
   // Refs for role fields that need to save data on approval
   const surveyorFieldsRef = useRef<SurveyorFieldsHandle>(null);
@@ -126,13 +200,13 @@ export default function ApplicationDetailsPage() {
 
   useEffect(() => {
     if (official && application) {
-      // Map application status to required role
       const statusToRoleMap: Record<string, string[]> = {
         'submitted': ['clerk'],
         'with_clerk': ['clerk'],
         'with_superintendent': ['superintendent'],
         'with_project_officer': ['project_officer', 'projectofficer'],
         'with_mro': ['mro'],
+        'revenue_verification': ['revenue_dept_officer', 'mro', 'revenue_inspector', 'surveyor', 'vro'],
         'with_surveyor': ['surveyor'],
         'with_revenue_inspector': ['revenue_inspector', 'revenueinspector'],
         'with_vro': ['vro'],
@@ -143,20 +217,11 @@ export default function ApplicationDetailsPage() {
       };
 
       const currentStatus = application.status?.toLowerCase() || '';
-      const officialDesignation = official.designation?.toLowerCase().replace(/\s+/g, '').replace(/_/g, '') || '';
-
       const allowedRoles = statusToRoleMap[currentStatus] || [];
       const assigned = allowedRoles.some(role => {
         const normalizedRole = role.replace(/\s+/g, '').replace(/_/g, '');
-        const normalizedOfficialRole = official.designation.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+        const normalizedOfficialRole = (official.designation || '').toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
         return normalizedOfficialRole.includes(normalizedRole) || normalizedRole.includes(normalizedOfficialRole);
-      });
-
-      console.log('Assignment check:', {
-        applicationStatus: currentStatus,
-        officialDesignation: officialDesignation,
-        allowedRoles: allowedRoles,
-        assigned: assigned
       });
 
       setIsAssigned(assigned);
@@ -165,45 +230,19 @@ export default function ApplicationDetailsPage() {
 
   const handleAction = async (action: 'approve' | 'reject' | 'forward', remarks: string) => {
     try {
-      // Save all role-specific data before proceeding with action
-      if (surveyorFieldsRef.current) {
-        await surveyorFieldsRef.current.save();
-      }
-      if (clerkFieldsRef.current) {
-        await clerkFieldsRef.current.save();
-      }
-      if (superintendentFieldsRef.current) {
-        await superintendentFieldsRef.current.save();
-      }
-      if (projectOfficerFieldsRef.current) {
-        await projectOfficerFieldsRef.current.save();
-      }
-      if (revenueInspectorFieldsRef.current) {
-        await revenueInspectorFieldsRef.current.save();
-      }
-      if (vroFieldsRef.current) {
-        await vroFieldsRef.current.save();
-      }
-      if (revenueDeptOfficerFieldsRef.current) {
-        await revenueDeptOfficerFieldsRef.current.save();
-      }
-      if (jointCollectorFieldsRef.current) {
-        await jointCollectorFieldsRef.current.save();
-      }
-      if (districtCollectorFieldsRef.current) {
-        await districtCollectorFieldsRef.current.save();
-      }
-      if (ministryWelfareFieldsRef.current) {
-        await ministryWelfareFieldsRef.current.save();
-      }
-      if (mroFieldsRef.current) {
-        await mroFieldsRef.current.save();
-      }
+      if (surveyorFieldsRef.current) await surveyorFieldsRef.current.save();
+      if (clerkFieldsRef.current) await clerkFieldsRef.current.save();
+      if (superintendentFieldsRef.current) await superintendentFieldsRef.current.save();
+      if (projectOfficerFieldsRef.current) await projectOfficerFieldsRef.current.save();
+      if (revenueInspectorFieldsRef.current) await revenueInspectorFieldsRef.current.save();
+      if (vroFieldsRef.current) await vroFieldsRef.current.save();
+      if (revenueDeptOfficerFieldsRef.current) await revenueDeptOfficerFieldsRef.current.save();
+      if (jointCollectorFieldsRef.current) await jointCollectorFieldsRef.current.save();
+      if (districtCollectorFieldsRef.current) await districtCollectorFieldsRef.current.save();
+      if (ministryWelfareFieldsRef.current) await ministryWelfareFieldsRef.current.save();
+      if (mroFieldsRef.current) await mroFieldsRef.current.save();
 
-      // Wait a moment for any async operations to complete
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Now proceed with the action
+      await new Promise(resolve => setTimeout(resolve, 300));
       proceedWithAction(action, remarks);
     } catch (error) {
       console.error('Error before action:', error);
@@ -214,96 +253,76 @@ export default function ApplicationDetailsPage() {
   const proceedWithAction = async (action: 'approve' | 'reject' | 'forward', remarks: string) => {
     setIsProcessing(true);
     try {
-      // Create FormData with all official data + files
       const formData = new FormData();
       formData.append('applicationId', application?._id || '');
       formData.append('action', action);
       formData.append('remarks', remarks);
 
-      // Collect data + files from whichever role component is active
       const designation = official?.designation.toLowerCase().replace(/\s+/g, '').replace(/_/g, '') || '';
 
       if (designation === 'surveyor' && surveyorFieldsRef.current?.getFormData) {
         const roleFormData = surveyorFieldsRef.current.getFormData(application?._id || '');
-        for (const [key, value] of roleFormData) {
-          formData.append(key, value);
-        }
+        for (const [key, value] of roleFormData) formData.append(key, value);
       } else if (designation === 'clerk' && clerkFieldsRef.current?.getFormData) {
         const roleFormData = clerkFieldsRef.current.getFormData(application?._id || '');
-        for (const [key, value] of roleFormData) {
-          formData.append(key, value);
-        }
+        for (const [key, value] of roleFormData) formData.append(key, value);
       } else if (designation === 'superintendent' && superintendentFieldsRef.current?.getFormData) {
         const roleFormData = superintendentFieldsRef.current.getFormData(application?._id || '');
-        for (const [key, value] of roleFormData) {
-          formData.append(key, value);
-        }
-      } else if (designation === 'projectofficer' && projectOfficerFieldsRef.current?.getFormData) {
-        const roleFormData = projectOfficerFieldsRef.current.getFormData(application?._id || '');
-        for (const [key, value] of roleFormData) {
-          formData.append(key, value);
-        }
-      } else if (designation === 'revenueinspector' && revenueInspectorFieldsRef.current?.getFormData) {
-        const roleFormData = revenueInspectorFieldsRef.current.getFormData(application?._id || '');
-        for (const [key, value] of roleFormData) {
-          formData.append(key, value);
-        }
-      } else if (designation === 'vro' && vroFieldsRef.current?.getFormData) {
-        const roleFormData = vroFieldsRef.current.getFormData(application?._id || '');
-        for (const [key, value] of roleFormData) {
-          formData.append(key, value);
-        }
-      } else if ((designation === 'revenuedeptofficer' || designation === 'revenuedepartmentofficer') && revenueDeptOfficerFieldsRef.current?.getFormData) {
-        const roleFormData = revenueDeptOfficerFieldsRef.current.getFormData(application?._id || '');
-        for (const [key, value] of roleFormData) {
-          formData.append(key, value);
-        }
-      } else if (designation === 'jointcollector' && jointCollectorFieldsRef.current?.getFormData) {
-        const roleFormData = jointCollectorFieldsRef.current.getFormData(application?._id || '');
-        for (const [key, value] of roleFormData) {
-          formData.append(key, value);
-        }
-      } else if (designation === 'districtcollector' && districtCollectorFieldsRef.current?.getFormData) {
-        const roleFormData = districtCollectorFieldsRef.current.getFormData(application?._id || '');
-        for (const [key, value] of roleFormData) {
-          formData.append(key, value);
-        }
-      } else if ((designation === 'ministrywelfare' || designation === 'ministryofwelfare') && ministryWelfareFieldsRef.current?.getFormData) {
-        const roleFormData = ministryWelfareFieldsRef.current.getFormData(application?._id || '');
-        for (const [key, value] of roleFormData) {
-          formData.append(key, value);
-        }
+        for (const [key, value] of roleFormData) formData.append(key, value);
       } else if (designation === 'mro' && mroFieldsRef.current?.getFormData) {
         const roleFormData = mroFieldsRef.current.getFormData(application?._id || '');
-        for (const [key, value] of roleFormData) {
-          formData.append(key, value);
-        }
+        for (const [key, value] of roleFormData) formData.append(key, value);
       }
 
       const response = await fetch('/api/dashboard/action', {
         method: 'POST',
-        // NO Content-Type header - browser will set it with multipart boundary
         body: formData,
       });
 
       if (response.ok) {
-        alert(`Application ${action}ed successfully!`);
-        router.push('/official-dashboard');
+        showToast(`Application successfully ${action}ed!`, 'success');
+        await fetchApplicationData();
       } else {
         const error = await response.json();
-        alert(`Failed: ${error.error || 'Action failed'}`);
-        setIsProcessing(false);
+        showToast(error.error || 'Action failed to execute', 'error');
       }
     } catch (error) {
       console.error('Error performing action:', error);
-      alert('Failed to perform action');
+      showToast('Encountered an issue executing official workflow action', 'error');
+    } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleGeneratePatta = async () => {
+    if (!application?._id) return;
+    setPattaLoading(true);
+    try {
+      const res = await fetch('/api/patta/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ applicationId: application._id }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast('Official Patta passbook generated and anchored to IPFS', 'success');
+        if (data.ipfsHash) {
+          window.open(`https://gateway.pinata.cloud/ipfs/${data.ipfsHash}`, '_blank');
+        } else {
+          window.open(`/api/land-requests/generate-pdf?receipt=${receiptNumber}`, '_blank');
+        }
+      } else {
+        showToast(data.error || 'Could not generate Patta certificate', 'error');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Patta generation failed', 'error');
+    } finally {
+      setPattaLoading(false);
     }
   };
 
   const getRoleComponent = () => {
     if (!official || !application) return null;
-
     const designation = official.designation.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
 
     switch (designation) {
@@ -338,67 +357,171 @@ export default function ApplicationDetailsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-linear-to-br from-slate-950 via-blue-950 to-slate-950 flex items-center justify-center">
-        <div className="text-white text-xl">Loading...</div>
+      <div className="min-h-screen bg-linear-to-br from-slate-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center gap-3">
+        <FaSpinner className="text-indigo-400 text-3xl animate-spin" />
+        <div className="text-slate-300 text-sm font-medium">Loading Application Context...</div>
       </div>
     );
   }
 
   if (!application) {
     return (
-      <div className="min-h-screen bg-linear-to-br from-slate-950 via-blue-950 to-slate-950 flex items-center justify-center">
-        <div className="text-white text-xl">Application not found</div>
+      <div className="min-h-screen bg-linear-to-br from-slate-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center gap-3">
+        <FaExclamationTriangle className="text-amber-400 text-3xl" />
+        <div className="text-white text-lg font-semibold">Application Record Not Found</div>
+        <button
+          onClick={() => router.push('/official-dashboard')}
+          className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs"
+        >
+          Return to Dashboard
+        </button>
       </div>
     );
   }
 
+  const currentStageIndex = getStageIndex(application.status);
+
   return (
-    <div className="min-h-screen bg-linear-to-br from-slate-950 via-blue-950 to-slate-950">
-      {/* Header */}
-      <div className="bg-slate-900/50 backdrop-blur-lg border-b border-blue-500/20 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <button
-            onClick={() => router.push('/official-dashboard')}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 hover:text-white rounded-lg transition-all"
-          >
-            <FaArrowLeft />
-            <span>Back to Dashboard</span>
-          </button>
-          <div className="text-right">
-            <p className="text-white font-semibold">{official?.firstName} {official?.lastName}</p>
-            <p className="text-sm text-blue-200">{official?.designation}</p>
+    <div className="min-h-screen bg-linear-to-br from-slate-950 via-slate-900 to-slate-950 pb-24 text-slate-100">
+      {/* Floating In-App Toast */}
+      {toast.show && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className={`px-4 py-3 rounded-xl backdrop-blur-xl border shadow-2xl flex items-center gap-3 text-xs font-semibold ${
+            toast.type === 'success'
+              ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-200'
+              : toast.type === 'error'
+              ? 'bg-rose-950/90 border-rose-500/40 text-rose-200'
+              : 'bg-slate-900/90 border-white/20 text-slate-200'
+          }`}>
+            {toast.type === 'success' ? (
+              <FaCheckCircle className="text-emerald-400 text-sm shrink-0" />
+            ) : toast.type === 'error' ? (
+              <FaTimesCircle className="text-rose-400 text-sm shrink-0" />
+            ) : (
+              <FaShieldAlt className="text-indigo-400 text-sm shrink-0" />
+            )}
+            <span>{toast.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Sticky App Bar */}
+      <div className="bg-slate-900/70 backdrop-blur-xl border-b border-white/10 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-6 py-3.5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push('/official-dashboard')}
+              className="flex items-center gap-2 px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-white/10 transition-all"
+            >
+              <FaArrowLeft className="text-[10px]" />
+              <span>Dashboard</span>
+            </button>
+            <div className="h-4 w-px bg-white/10 hidden sm:block" />
+            <div className="hidden sm:flex items-center gap-2">
+              <span className="text-xs text-slate-400">Record:</span>
+              <span className="text-xs font-mono font-bold text-white">{receiptNumber}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 text-right">
+            <div>
+              <p className="text-white text-xs font-bold">{official?.firstName} {official?.lastName}</p>
+              <p className="text-[11px] text-indigo-300/80 font-medium">{official?.designation}</p>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Application Header */}
-        <div className="bg-white/10 backdrop-blur-lg rounded-2xl border border-blue-500/20 p-6 mb-6">
-          <h1 className="text-3xl font-bold text-white mb-2">Application Details</h1>
-          <p className="text-xl text-blue-200 font-mono">{receiptNumber}</p>
-          <div className="mt-4 flex items-center gap-4">
-            <span className={`px-4 py-2 rounded-lg font-semibold ${application.status === 'completed' ? 'bg-green-500/20 text-green-200' :
-              application.status === 'rejected' ? 'bg-red-500/20 text-red-200' :
-                'bg-yellow-500/20 text-yellow-200'
+      {/* Main Content Area */}
+      <div className="max-w-7xl mx-auto px-6 py-6">
+        {/* Application Header Card & Workflow Stepper */}
+        <div className="bg-slate-900/60 backdrop-blur-md rounded-2xl border border-white/10 p-6 mb-6 shadow-xl">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-white/10">
+            <div>
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-xs text-indigo-300 font-semibold uppercase tracking-wider">Land Registration Docket</span>
+                <span className="text-white/20">•</span>
+                <span className="text-xs text-slate-400">
+                  Registered: {new Date(application.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-bold text-white tracking-tight">{application.fullName || application.ownerName}</h1>
+                <CopyPill text={receiptNumber} label="Receipt Number" />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider border ${
+                application.status === 'completed'
+                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                  : application.status === 'rejected'
+                  ? 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+                  : 'bg-amber-500/15 border-amber-500/30 text-amber-300'
               }`}>
-              {application.status.replace(/_/g, ' ').toUpperCase()}
-            </span>
-            <span className="text-blue-200">
-              Submitted: {new Date(application.createdAt).toLocaleDateString()}
-            </span>
+                {application.status.replace(/_/g, ' ')}
+              </span>
+            </div>
+          </div>
+
+          {/* Workflow Stage Pipeline Stepper */}
+          <div className="pt-6">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-4">
+              Statutory Lifecycle Stage
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+              {WORKFLOW_STAGES.map((stage, idx) => {
+                const isPassed = idx < currentStageIndex;
+                const isCurrent = idx === currentStageIndex;
+                return (
+                  <div
+                    key={stage.id}
+                    className={`p-3 rounded-xl border transition-all ${
+                      isCurrent
+                        ? 'bg-indigo-600/20 border-indigo-500/50 shadow-lg shadow-indigo-500/10'
+                        : isPassed
+                        ? 'bg-emerald-500/10 border-emerald-500/20'
+                        : 'bg-white/[0.02] border-white/5 opacity-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-mono text-slate-400">0{idx + 1}</span>
+                      {isPassed ? (
+                        <FaCheckCircle className="text-emerald-400 text-xs" />
+                      ) : isCurrent ? (
+                        <div className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
+                      ) : (
+                        <div className="w-1.5 h-1.5 rounded-full bg-white/20" />
+                      )}
+                    </div>
+                    <p className={`text-xs font-semibold truncate ${
+                      isCurrent ? 'text-indigo-200' : isPassed ? 'text-emerald-200' : 'text-slate-400'
+                    }`}>
+                      {stage.label}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
-        {/* AI Application Assistant — Chatbot for Officials */}
+        {/* AI Record Assistant — Chatbot 1 */}
         {!showAIAgent ? (
           <button
             onClick={() => setShowAIAgent(true)}
-            className="w-full mb-6 py-4 rounded-2xl bg-gradient-to-r from-amber-600/10 to-orange-600/10 hover:from-amber-600/20 hover:to-orange-600/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-300 font-semibold transition-all flex items-center justify-center gap-3 group"
+            className="w-full mb-6 py-3.5 px-6 rounded-2xl bg-linear-to-r from-amber-600/15 via-orange-600/15 to-amber-600/15 hover:from-amber-600/25 hover:to-orange-600/25 border border-amber-500/30 text-amber-200 font-medium text-xs transition-all flex items-center justify-between group shadow-lg"
           >
-            <span className="text-xl group-hover:scale-110 transition-transform">🤖</span>
-            <span>Open AI Assistant — Get instant application summary</span>
-            <span className="text-xs bg-amber-500/20 px-2 py-0.5 rounded-full">AI Agent</span>
+            <div className="flex items-center gap-3">
+              <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-300">
+                <FaRobot className="text-xs group-hover:scale-110 transition-transform" />
+              </div>
+              <span className="font-semibold text-sm text-white">Record Intelligence Assistant</span>
+              <span className="text-[11px] text-amber-300/70 hidden sm:inline">— On-demand dossier analysis & statutory checklists</span>
+            </div>
+            <span className="px-2.5 py-1 rounded-md bg-amber-500/20 text-amber-300 text-[10px] font-semibold uppercase tracking-wider">
+              Open Console
+            </span>
           </button>
         ) : (
           <div className="mb-6">
@@ -412,146 +535,230 @@ export default function ApplicationDetailsPage() {
           </div>
         )}
 
-        {/* Applicant Information */}
-        <div className="bg-white/10 backdrop-blur-lg rounded-2xl border border-blue-500/20 p-6 mb-6">
-          <h2 className="text-xl font-bold text-blue-300 mb-4 flex items-center gap-2">
-            <FaUser />
-            Applicant Information
+        {/* Applicant Information Card */}
+        <div className="bg-slate-900/60 backdrop-blur-md rounded-2xl border border-white/10 p-6 mb-6 shadow-xl">
+          <h2 className="text-base font-bold text-white mb-4 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-blue-500/15 border border-blue-500/25 flex items-center justify-center text-blue-400">
+              <FaUser className="text-xs" />
+            </div>
+            <span>Applicant & Identity Profile</span>
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-              <label className="text-xs text-blue-300/70 uppercase tracking-wider">Full Name</label>
-              <p className="text-white font-semibold mt-1 text-lg">{application.fullName || application.ownerName}</p>
+            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Full Legal Name</label>
+              <p className="text-white font-semibold mt-1 text-base">{application.fullName || application.ownerName}</p>
             </div>
-            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-              <label className="text-xs text-blue-300/70 uppercase tracking-wider">Email</label>
-              <p className="text-white font-semibold mt-1">{application.email || 'N/A'}</p>
+            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Contact Email</label>
+              <p className="text-slate-200 font-medium mt-1 text-sm font-mono">{application.email || 'N/A'}</p>
             </div>
-            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-              <label className="text-xs text-blue-300/70 uppercase tracking-wider">Phone Number</label>
-              <p className="text-white font-semibold mt-1">{application.phoneNumber || 'N/A'}</p>
+            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Mobile Number</label>
+              <p className="text-slate-200 font-medium mt-1 text-sm font-mono">{application.phoneNumber || 'N/A'}</p>
             </div>
-            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-              <label className="text-xs text-blue-300/70 uppercase tracking-wider">Receipt Number</label>
-              <p className="text-white font-semibold mt-1 font-mono text-sm">{application.receiptNumber}</p>
+            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Receipt Identifier</label>
+              <p className="text-indigo-300 font-semibold mt-1 text-sm font-mono">{application.receiptNumber}</p>
             </div>
             <div className="md:col-span-2">
-              <label className="text-xs text-blue-300/70 uppercase tracking-wider block mb-2">Decentralized Identity (DID)</label>
               <DIDDisplay did={(application as any).did} compact={false} />
             </div>
           </div>
         </div>
 
-        {/* Land Details */}
-        <div className="bg-white/10 backdrop-blur-lg rounded-2xl border border-green-500/20 p-6 mb-6">
-          <h2 className="text-xl font-bold text-green-300 mb-4 flex items-center gap-2">
-            <FaMapMarkedAlt />
-            Land Details
+        {/* Land Particulars Card */}
+        <div className="bg-slate-900/60 backdrop-blur-md rounded-2xl border border-white/10 p-6 mb-6 shadow-xl">
+          <h2 className="text-base font-bold text-white mb-4 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
+              <FaMapMarkedAlt className="text-xs" />
+            </div>
+            <span>Parcel & Cadastral Attributes</span>
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-              <label className="text-xs text-green-300/70 uppercase tracking-wider">Owner Name</label>
-              <p className="text-white font-semibold mt-1 text-lg">{application.ownerName}</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Recorded Owner</label>
+              <p className="text-white font-semibold mt-1 text-sm">{application.ownerName}</p>
             </div>
-            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-              <label className="text-xs text-green-300/70 uppercase tracking-wider">Survey Number</label>
-              <p className="text-white font-semibold mt-1">{application.surveyNumber}</p>
-            </div>
-            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-              <label className="text-xs text-green-300/70 uppercase tracking-wider">Area</label>
-              <p className="text-white font-semibold mt-1">{application.area}</p>
-            </div>
-            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-              <label className="text-xs text-green-300/70 uppercase tracking-wider">Nature</label>
-              <p className="text-white font-semibold mt-1 capitalize">{application.nature || 'N/A'}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Address */}
-        <div className="bg-white/10 backdrop-blur-lg rounded-2xl border border-purple-500/20 p-6 mb-6">
-          <h2 className="text-xl font-bold text-purple-300 mb-4 flex items-center gap-2">
-            <FaHome />
-            Address Information
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-3 bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-              <label className="text-xs text-purple-300/70 uppercase tracking-wider">Full Address</label>
-              <p className="text-white font-semibold mt-1">{application.address || 'N/A'}</p>
-            </div>
-            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-              <label className="text-xs text-purple-300/70 uppercase tracking-wider">City</label>
-              <p className="text-white font-semibold mt-1">{application.city || 'N/A'}</p>
-            </div>
-            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-              <label className="text-xs text-purple-300/70 uppercase tracking-wider">State</label>
-              <p className="text-white font-semibold mt-1">{application.state || 'N/A'}</p>
-            </div>
-            <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-              <label className="text-xs text-purple-300/70 uppercase tracking-wider">Pincode</label>
-              <p className="text-white font-semibold mt-1">{application.pincode || 'N/A'}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Documents & Security */}
-        <div className="bg-white/10 backdrop-blur-lg rounded-2xl border border-indigo-500/20 p-6 mb-6">
-          <h2 className="text-xl font-bold text-indigo-300 mb-4 flex items-center gap-2">
-            <FaFileAlt />
-            Documents & Security
-          </h2>
-          <div className="space-y-4">
-            <div className="bg-slate-800/70 p-5 rounded-xl border border-purple-500/30">
-              <div className="flex items-center justify-between">
-                <span className="text-white font-semibold">Land Request Application Form</span>
-                <a
-                  href={`/api/land-requests/generate-form?receipt=${receiptNumber}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-4 py-2 bg-purple-500/20 hover:bg-purple-500/40 text-purple-200 hover:text-white rounded-lg transition-all"
-                >
-                  View Form
-                </a>
+            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Cadastral Survey Number</label>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-emerald-300 font-semibold text-sm font-mono">{application.surveyNumber}</span>
+                <CopyPill text={application.surveyNumber} label="Survey Number" />
               </div>
             </div>
+            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Parcel Extent</label>
+              <p className="text-white font-semibold mt-1 text-sm">{application.area}</p>
+            </div>
+            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Land Nature</label>
+              <p className="text-white font-semibold mt-1 text-sm capitalize">{application.nature || 'Not Specified'}</p>
+            </div>
+          </div>
+        </div>
 
-            {application.ipfsHash && (
-              <div className="bg-slate-800/70 p-5 rounded-xl border border-blue-500/30">
-                <div className="flex items-center justify-between">
-                  <span className="text-white font-semibold">User Uploaded Document</span>
+        {/* Address Card */}
+        <div className="bg-slate-900/60 backdrop-blur-md rounded-2xl border border-white/10 p-6 mb-6 shadow-xl">
+          <h2 className="text-base font-bold text-white mb-4 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-indigo-500/15 border border-indigo-500/25 flex items-center justify-center text-indigo-400">
+              <FaHome className="text-xs" />
+            </div>
+            <span>Jurisdiction & Revenue Location</span>
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-3 bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Postal Address</label>
+              <p className="text-slate-200 font-medium mt-1 text-sm">{application.address || 'N/A'}</p>
+            </div>
+            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Mandal / City</label>
+              <p className="text-slate-200 font-medium mt-1 text-sm">{application.city || 'N/A'}</p>
+            </div>
+            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">District / State</label>
+              <p className="text-slate-200 font-medium mt-1 text-sm">{application.state || 'Telangana'}</p>
+            </div>
+            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">PIN Code</label>
+              <p className="text-slate-200 font-medium mt-1 text-sm font-mono">{application.pincode || 'N/A'}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Documents & Security Card */}
+        <div className="bg-slate-900/60 backdrop-blur-md rounded-2xl border border-white/10 p-6 mb-6 shadow-xl">
+          <h2 className="text-base font-bold text-white mb-4 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-indigo-500/15 border border-indigo-500/25 flex items-center justify-center text-indigo-400">
+              <FaFileAlt className="text-xs" />
+            </div>
+            <span>Evidence, Ledger Cryptography & Verification</span>
+          </h2>
+
+          <div className="space-y-4">
+            {/* Form Card */}
+            <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <span className="text-white font-semibold text-sm">Citizen Declaration Dossier</span>
+                  <p className="text-[11px] text-slate-400">Official statutory registration declaration form</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPreviewDocUrl(previewDocUrl === `/api/land-requests/generate-form?receipt=${receiptNumber}` ? null : `/api/land-requests/generate-form?receipt=${receiptNumber}`)}
+                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-white/10 transition-all flex items-center gap-1.5"
+                  >
+                    {previewDocUrl === `/api/land-requests/generate-form?receipt=${receiptNumber}` ? (
+                      <>
+                        <FaTimes className="text-[10px]" />
+                        <span>Close Preview</span>
+                      </>
+                    ) : (
+                      <>
+                        <FaEye className="text-[10px]" />
+                        <span>Inline Preview</span>
+                      </>
+                    )}
+                  </button>
                   <a
-                    href={`/api/documents/view?hash=${application.ipfsHash}`}
+                    href={`/api/land-requests/generate-form?receipt=${receiptNumber}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/40 text-blue-200 hover:text-white rounded-lg transition-all"
+                    className="px-3 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 hover:text-white rounded-lg text-xs font-medium border border-indigo-500/30 transition-all flex items-center gap-1.5"
                   >
-                    View Document
+                    <FaExternalLinkAlt className="text-[10px]" />
+                    <span>Open Tab</span>
                   </a>
                 </div>
               </div>
+
+              {previewDocUrl === `/api/land-requests/generate-form?receipt=${receiptNumber}` && (
+                <div className="mt-4 pt-4 border-t border-white/10 animate-in fade-in duration-300">
+                  <iframe
+                    src={`/api/land-requests/generate-form?receipt=${receiptNumber}`}
+                    className="w-full h-[550px] rounded-xl bg-white border border-white/10"
+                    title="Form Preview"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Uploaded Deed Card */}
+            {application.ipfsHash && (
+              <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <span className="text-white font-semibold text-sm">Citizen Uploaded Deed / Evidence</span>
+                    <p className="text-[11px] text-slate-400 font-mono">IPFS Hash: {application.ipfsHash.substring(0, 20)}...</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setPreviewDocUrl(previewDocUrl === `/api/documents/view?hash=${application.ipfsHash}` ? null : `/api/documents/view?hash=${application.ipfsHash}`)}
+                      className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-white/10 transition-all flex items-center gap-1.5"
+                    >
+                      {previewDocUrl === `/api/documents/view?hash=${application.ipfsHash}` ? (
+                        <>
+                          <FaTimes className="text-[10px]" />
+                          <span>Close Preview</span>
+                        </>
+                      ) : (
+                        <>
+                          <FaEye className="text-[10px]" />
+                          <span>Inline Preview</span>
+                        </>
+                      )}
+                    </button>
+                    <a
+                      href={`/api/documents/view?hash=${application.ipfsHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 bg-blue-600/30 hover:bg-blue-600/50 text-blue-200 hover:text-white rounded-lg text-xs font-medium border border-blue-500/30 transition-all flex items-center gap-1.5"
+                    >
+                      <FaExternalLinkAlt className="text-[10px]" />
+                      <span>Open Tab</span>
+                    </a>
+                  </div>
+                </div>
+
+                {previewDocUrl === `/api/documents/view?hash=${application.ipfsHash}` && (
+                  <div className="mt-4 pt-4 border-t border-white/10 animate-in fade-in duration-300">
+                    <iframe
+                      src={`/api/documents/view?hash=${application.ipfsHash}`}
+                      className="w-full h-[550px] rounded-xl bg-white border border-white/10"
+                      title="Document Preview"
+                    />
+                  </div>
+                )}
+              </div>
             )}
 
-            {/* M8 AI Trust Score (Persona: Collector / Joint Collector) */}
+            {/* M8 AI Trust Score Gauge */}
             <AITrustScore
               application={application}
-              isVisible={['clerk', 'mro', 'collector', 'jointcollector', 'districtcollector', 'district_collector'].some(r => official?.designation?.toLowerCase().includes(r))}
+              isVisible={['clerk', 'mro', 'collector', 'jointcollector', 'districtcollector', 'district_collector', 'revenue'].some(r => official?.designation?.toLowerCase().includes(r))}
             />
 
-            {/* M8 AI Trust Score Agent — Interactive Chat for Trust Explanation */}
-            {['clerk', 'mro', 'collector', 'jointcollector', 'districtcollector', 'district_collector'].some(r => official?.designation?.toLowerCase().includes(r)) && (
+            {/* M8 AI Trust Score Explainer — Chatbot 2 */}
+            {['clerk', 'mro', 'collector', 'jointcollector', 'districtcollector', 'district_collector', 'revenue'].some(r => official?.designation?.toLowerCase().includes(r)) && (
               <div>
                 {!showTrustAgent ? (
                   <button
                     onClick={() => setShowTrustAgent(true)}
-                    className="w-full py-4 rounded-2xl bg-gradient-to-r from-cyan-600/10 to-blue-600/10 hover:from-cyan-600/20 hover:to-blue-600/20 border border-cyan-500/20 hover:border-cyan-500/40 text-cyan-300 font-semibold transition-all flex items-center justify-center gap-3 group"
+                    className="w-full py-3.5 px-6 rounded-2xl bg-linear-to-r from-cyan-600/15 via-blue-600/15 to-cyan-600/15 hover:from-cyan-600/25 hover:to-blue-600/25 border border-cyan-500/30 text-cyan-200 font-medium text-xs transition-all flex items-center justify-between group shadow-lg"
                   >
-                    <span className="text-xl group-hover:scale-110 transition-transform">🧠</span>
-                    <span>Ask AI Agent — "Why is this trust score?"</span>
-                    <span className="text-xs bg-cyan-500/20 px-2 py-0.5 rounded-full">M8 Trust Indexer</span>
+                    <div className="flex items-center gap-3">
+                      <div className="w-7 h-7 rounded-lg bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-300">
+                        <FaBrain className="text-xs group-hover:scale-110 transition-transform" />
+                      </div>
+                      <span className="font-semibold text-sm text-white">M8 Trust Indexer Telemetry</span>
+                      <span className="text-[11px] text-cyan-300/70 hidden sm:inline">— Blockchain cryptographic audits & score decomposition</span>
+                    </div>
+                    <span className="px-2.5 py-1 rounded-md bg-cyan-500/20 text-cyan-300 text-[10px] font-semibold uppercase tracking-wider">
+                      Query Node
+                    </span>
                   </button>
                 ) : (
                   <TrustScoreAgent
-                    applicationId={`APP-${application.receiptNumber}`}
+                    applicationId={application.receiptNumber}
                     isVisible={showTrustAgent}
                     onClose={() => setShowTrustAgent(false)}
                   />
@@ -559,31 +766,29 @@ export default function ApplicationDetailsPage() {
               </div>
             )}
 
-            {/* M7 Blockchain Integrity Anchor (Persona: Clerk, MRO and higher) */}
-            {application.docHash && ['clerk', 'mro', 'collector', 'jointcollector', 'districtcollector', 'district_collector'].some(r => official?.designation?.toLowerCase().includes(r)) && (
-              <div className="bg-slate-800/70 p-5 rounded-xl border border-green-500/30">
+            {/* M7 Blockchain Integrity Anchor */}
+            {application.docHash && (
+              <div className="bg-slate-950/40 p-4 rounded-xl border border-white/5">
                 <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2 text-green-300">
-                    <FaShieldAlt className="text-xl" />
-                    <span className="font-bold">Blockchain Integrity Anchor (M7)</span>
+                  <div className="flex items-center gap-2 text-emerald-400">
+                    <FaShieldAlt className="text-base" />
+                    <span className="font-bold text-xs uppercase tracking-wider">Blockchain Ledger Anchor (M7)</span>
                   </div>
-                  <div className="bg-black/40 p-3 rounded-lg border border-green-500/20">
-                    <p className="text-xs text-green-200/50 uppercase tracking-widest mb-1">SHA-256 DocHash</p>
-                    <p className="text-sm text-green-400 font-mono break-all">{application.docHash}</p>
+                  <div className="bg-black/50 p-3 rounded-lg border border-emerald-500/20">
+                    <p className="text-[10px] text-slate-400 uppercase tracking-widest mb-1">SHA-256 State Hash</p>
+                    <p className="text-xs text-emerald-300 font-mono break-all">{application.docHash}</p>
                   </div>
-                  <p className="text-xs text-blue-200/70 mt-1 italic">
-                    * This hash is anchored to the Hyperledger Fabric ledger and verified against the DigiLocker source.
+                  <p className="text-[11px] text-slate-400">
+                    Anchored to Hyperledger Fabric channel. Verified against cryptographic state root.
                   </p>
                 </div>
               </div>
             )}
 
-            {/* M9 AI/OCR Analysis (Persona: Clerk, Superintendent, Project Officer, and MRO) */}
-            {(['clerk', 'superintendent', 'project_officer', 'mro', 'officer', 'revenue'].some(r => official?.designation?.toLowerCase().includes(r))) && (
-              <OCRAnalysisPanel application={application} />
-            )}
+            {/* M9 AI/OCR Analysis */}
+            <OCRAnalysisPanel application={application} />
 
-            {/* DigiLocker Document Request (Visible to Processing Officers) */}
+            {/* DigiLocker Request */}
             {official?._id && (
               <DigiLockerRequestPanel
                 aadharNumber={application.aadharNumber || ''}
@@ -602,190 +807,172 @@ export default function ApplicationDetailsPage() {
         {/* Role-Specific Fields */}
         {getRoleComponent()}
 
-        {/* Action Buttons */}
-        {
-          isAssigned && (
-            <div className="bg-white/10 backdrop-blur-lg rounded-2xl border border-blue-500/20 p-6">
-              <h2 className="text-xl font-bold text-white mb-4">Take Action</h2>
-              <div className="flex gap-4">
-                <button
-                  onClick={() => handleAction('forward', `Approved by ${official?.designation}`)}
-                  disabled={isProcessing}
-                  className={`flex-1 px-6 py-4 rounded-xl font-bold transition-all border ${isProcessing
-                    ? 'bg-gray-500/20 text-gray-300 border-gray-500/30 cursor-not-allowed opacity-50'
-                    : 'bg-linear-to-r from-green-500/20 to-emerald-500/20 hover:from-green-500/30 hover:to-emerald-500/30 text-green-200 hover:text-white border-green-500/30'
-                    }`}
-                >
-                  <FaCheckCircle className="inline mr-2" />
-                  {isProcessing ? 'Processing...' : (official?.designation?.toLowerCase() === 'clerk' ? 'Forward' : 'Approve & Forward')}
-                </button>
-                <button
-                  onClick={() => handleAction('reject', `Rejected by ${official?.designation}`)}
-                  disabled={isProcessing}
-                  className={`flex-1 px-6 py-4 rounded-xl font-bold transition-all border ${isProcessing
-                    ? 'bg-gray-500/20 text-gray-300 border-gray-500/30 cursor-not-allowed opacity-50'
-                    : 'bg-linear-to-r from-red-500/20 to-rose-500/20 hover:from-red-500/30 hover:to-rose-500/30 text-red-200 hover:text-white border-red-500/30'
-                    }`}
-                >
-                  <FaExclamationTriangle className="inline mr-2" />
-                  {isProcessing ? 'Processing...' : 'Reject'}
-                </button>
-              </div>
-            </div>
-          )
-        }
-
-        {
-          !isAssigned && (
-            <div className={`backdrop-blur-lg rounded-2xl border p-6 ${application?.status === 'completed'
-              ? 'bg-green-500/10 border-green-500/30'
-              : application?.status === 'rejected'
-                ? 'bg-red-500/10 border-red-500/30'
-                : 'bg-yellow-500/10 border-yellow-500/30'
-              }`}>
-              <div className="flex items-center gap-3">
-                {application?.status === 'completed' ? (
+        {/* Workflow Actions Section */}
+        {isAssigned ? (
+          <div className="bg-slate-900/60 backdrop-blur-md rounded-2xl border border-white/10 p-6 shadow-xl mb-6">
+            <h2 className="text-base font-bold text-white mb-2">Statutory Decision Authority</h2>
+            <p className="text-xs text-slate-400 mb-5">
+              Review all extracted evidence, boundary coordinates, and ledger checks before affixing digital endorsement.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <button
+                onClick={() => handleAction('forward', `Endorsed by ${official?.designation}`)}
+                disabled={isProcessing}
+                className={`flex-1 px-6 py-3.5 rounded-xl font-bold text-sm transition-all border flex items-center justify-center gap-2 ${
+                  isProcessing
+                    ? 'bg-slate-800 text-slate-400 border-white/5 cursor-not-allowed opacity-50'
+                    : 'bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 hover:text-white border-emerald-500/40 shadow-lg'
+                }`}
+              >
+                {isProcessing ? (
                   <>
-                    <FaCheckCircle className="text-green-400 text-3xl shrink-0" />
-                    <div>
-                      <h3 className="text-xl font-bold text-green-300">✅ Application Approved</h3>
-                      <p className="text-sm text-green-200 mt-1">
-                        This application has been successfully approved and completed through all required stages.
-                      </p>
-                    </div>
-                  </>
-                ) : application.status === 'rejected' ? (
-                  <>
-                    <FaExclamationTriangle className="text-red-400 text-3xl shrink-0" />
-                    <div>
-                      <h3 className="text-xl font-bold text-red-300">❌ Application Rejected</h3>
-                      <p className="text-sm text-red-200 mt-1">
-                        This application has been rejected. Please check the application history for rejection details and reasons.
-                      </p>
-                    </div>
+                    <FaSpinner className="animate-spin text-sm" />
+                    <span>Processing Endorsement...</span>
                   </>
                 ) : (
                   <>
-                    <FaClock className="text-yellow-400 text-3xl shrink-0" />
-                    <div>
-                      <h3 className="text-xl font-bold text-yellow-300">ℹ️ Application In Progress</h3>
-                      <p className="text-sm text-yellow-200 mt-1">
-                        This application is not currently assigned to you. You can view the details but cannot take action.
-                      </p>
-                    </div>
+                    <FaCheckCircle className="text-emerald-400 text-sm" />
+                    <span>{official?.designation?.toLowerCase() === 'clerk' ? 'Forward to Supervisory Node' : 'Approve & Advance Dossier'}</span>
                   </>
                 )}
-              </div>
+              </button>
+              <button
+                onClick={() => handleAction('reject', `Rejected by ${official?.designation}`)}
+                disabled={isProcessing}
+                className={`flex-1 px-6 py-3.5 rounded-xl font-bold text-sm transition-all border flex items-center justify-center gap-2 ${
+                  isProcessing
+                    ? 'bg-slate-800 text-slate-400 border-white/5 cursor-not-allowed opacity-50'
+                    : 'bg-rose-600/25 hover:bg-rose-600/40 text-rose-200 hover:text-white border-rose-500/40 shadow-lg'
+                }`}
+              >
+                <FaTimesCircle className="text-rose-400 text-sm" />
+                <span>Return with Objections / Reject</span>
+              </button>
             </div>
-          )
-        }
-
-        {/* Unsaved Data Warning Modal */}
-        {
-          showDataWarning && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-              <div className="bg-slate-900 rounded-2xl border border-yellow-500/30 p-8 max-w-md w-full">
-                <div className="flex items-start gap-3 mb-4">
-                  <FaExclamationTriangle className="text-yellow-400 text-2xl shrink-0 mt-1" />
+          </div>
+        ) : (
+          <div className={`backdrop-blur-md rounded-2xl border p-6 shadow-xl mb-6 ${
+            application?.status === 'completed'
+              ? 'bg-emerald-950/30 border-emerald-500/30'
+              : application?.status === 'rejected'
+              ? 'bg-rose-950/30 border-rose-500/30'
+              : 'bg-slate-900/60 border-white/10'
+          }`}>
+            <div className="flex items-start gap-4">
+              {application?.status === 'completed' ? (
+                <>
+                  <FaCheckCircle className="text-emerald-400 text-2xl shrink-0 mt-0.5" />
                   <div>
-                    <h3 className="text-xl font-bold text-yellow-300">Unsaved Data Detected</h3>
-                    <p className="text-sm text-yellow-200 mt-1">
-                      There may be data that hasn't been auto-saved yet. Please wait a moment or click the save button to ensure all data is saved before proceeding with your action.
+                    <h3 className="text-base font-bold text-emerald-300">Statutory Application Completed</h3>
+                    <p className="text-xs text-emerald-200/80 mt-1 leading-relaxed">
+                      All departmental endorsements and cadastral validations are completed and anchored on the blockchain ledger.
+                    </p>
+                    <div className="mt-3">
+                      <button
+                        onClick={handleGeneratePatta}
+                        disabled={pattaLoading}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded-xl shadow-lg transition-all flex items-center gap-2"
+                      >
+                        {pattaLoading ? <FaSpinner className="animate-spin text-xs" /> : <FaFileAlt className="text-xs" />}
+                        <span>{pattaLoading ? 'Generating Patta...' : 'View / Download Official Patta Passbook'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : application.status === 'rejected' ? (
+                <>
+                  <FaTimesCircle className="text-rose-400 text-2xl shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="text-base font-bold text-rose-300">Application File Rejected</h3>
+                    <p className="text-xs text-rose-200/80 mt-1 leading-relaxed">
+                      This docket was rejected during official review. Check the timeline history above for official objections.
                     </p>
                   </div>
-                </div>
+                </>
+              ) : (
+                <>
+                  <FaClock className="text-amber-400 text-2xl shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="text-base font-bold text-amber-300">File In Active Departmental Review</h3>
+                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                      This docket is currently progressing through the {application.status.replace(/_/g, ' ')} stage. Read-only review mode active.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
-                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 mb-6">
-                  <p className="text-sm text-yellow-100">
-                    <strong>⏳ Auto-save is running...</strong> Data will be saved automatically as you make changes.
+        {/* Unsaved Data Warning Modal */}
+        {showDataWarning && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+            <div className="bg-slate-900 rounded-2xl border border-amber-500/30 p-6 max-w-md w-full shadow-2xl">
+              <div className="flex items-start gap-3 mb-4">
+                <FaExclamationTriangle className="text-amber-400 text-xl shrink-0 mt-1" />
+                <div>
+                  <h3 className="text-base font-bold text-amber-300">Unsaved Form Input Detected</h3>
+                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                    Auto-save is persisting data. Wait 2 seconds or click Proceed to complete state anchoring.
                   </p>
                 </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => {
-                      setShowDataWarning(false);
-                      setPendingAction(null);
-                    }}
-                    className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-semibold transition-all"
-                  >
-                    Go Back
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowDataWarning(false);
-                      if (pendingAction) {
-                        // Wait for auto-save to complete (2 seconds)
-                        setTimeout(() => {
-                          proceedWithAction(pendingAction.action, pendingAction.remarks);
-                        }, 2500);
-                      }
-                    }}
-                    className="flex-1 px-4 py-2 bg-green-500/20 hover:bg-green-500/30 text-green-200 border border-green-500/30 rounded-lg font-semibold transition-all"
-                  >
-                    Wait & Proceed
-                  </button>
-                </div>
+              </div>
+              <div className="flex gap-3 mt-5">
+                <button
+                  onClick={() => { setShowDataWarning(false); setPendingAction(null); }}
+                  className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl text-xs font-semibold border border-white/10 transition-all"
+                >
+                  Review Form
+                </button>
+                <button
+                  onClick={() => {
+                    setShowDataWarning(false);
+                    if (pendingAction) {
+                      setTimeout(() => proceedWithAction(pendingAction.action, pendingAction.remarks), 1500);
+                    }
+                  }}
+                  className="flex-1 px-4 py-2 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-500/40 rounded-xl text-xs font-semibold transition-all"
+                >
+                  Proceed
+                </button>
               </div>
             </div>
-          )
-        }
+          </div>
+        )}
+      </div>
 
-        {/* Loading Indicator Modal */}
-        {
-          isProcessing && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-              <div className="flex flex-col items-center gap-6">
-                {/* Animated Spinner */}
-                <div className="relative w-20 h-20">
-                  {/* Outer rotating ring */}
-                  <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-green-400 border-r-green-400 animate-spin"
-                    style={{
-                      animation: 'spin 2s linear infinite'
-                    }}
-                  />
-                  {/* Middle rotating ring (opposite direction) */}
-                  <div className="absolute inset-2 rounded-full border-4 border-transparent border-b-blue-400 border-l-blue-400 animate-spin"
-                    style={{
-                      animation: 'spin 3s linear infinite reverse'
-                    }}
-                  />
-                  {/* Center dot */}
-                  <div className="absolute inset-0 rounded-full flex items-center justify-center">
-                    <div className="w-3 h-3 bg-linear-to-br from-green-400 to-blue-400 rounded-full animate-pulse" />
-                  </div>
-                </div>
-
-                {/* Text */}
-                <div className="text-center">
-                  <h3 className="text-xl font-bold text-white mb-2">Processing</h3>
-                  <p className="text-sm text-gray-300">Uploading documents and processing your action...</p>
-                </div>
-
-                {/* Progress dots */}
-                <div className="flex gap-2">
-                  <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-                  <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
-                </div>
+      {/* Sticky Bottom Action Dock (when application is assigned to the active official) */}
+      {isAssigned && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[92%] max-w-4xl animate-in slide-in-from-bottom-4 duration-300">
+          <div className="bg-slate-900/90 backdrop-blur-xl border border-white/15 px-5 py-3 rounded-2xl shadow-2xl flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <div>
+                <span className="text-white text-xs font-bold">{receiptNumber}</span>
+                <span className="text-slate-400 text-xs ml-2 hidden sm:inline">• Assigned for Official Action</span>
               </div>
-
-              {/* CSS for custom animations */}
-              <style>{`
-              @keyframes spin {
-                from {
-                  transform: rotate(0deg);
-                }
-                to {
-                  transform: rotate(360deg);
-                }
-              }
-            `}</style>
             </div>
-          )
-        }
-      </div >
-    </div >
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={() => handleAction('forward', `Endorsed by ${official?.designation}`)}
+                disabled={isProcessing}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded-xl shadow-lg transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isProcessing ? <FaSpinner className="animate-spin text-xs" /> : <FaCheckCircle className="text-xs" />}
+                <span>{official?.designation?.toLowerCase() === 'clerk' ? 'Forward' : 'Approve & Forward'}</span>
+              </button>
+              <button
+                onClick={() => handleAction('reject', `Rejected by ${official?.designation}`)}
+                disabled={isProcessing}
+                className="px-4 py-2 bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 hover:text-white font-semibold text-xs rounded-xl border border-rose-500/40 transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <FaTimesCircle className="text-xs" />
+                <span>Reject</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
-

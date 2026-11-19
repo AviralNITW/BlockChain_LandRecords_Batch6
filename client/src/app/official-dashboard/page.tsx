@@ -5,11 +5,11 @@ import {
   FaFileAlt, FaCheckCircle, FaClock, FaExclamationTriangle,
   FaChartLine, FaBell, FaUser, FaSignOutAlt, FaHome,
   FaClipboardList, FaMapMarkedAlt, FaRuler, FaCoins,
-  FaUserTie, FaBuilding, FaShieldAlt, FaCrown, FaBriefcase
+  FaUserTie, FaBuilding, FaShieldAlt, FaCrown, FaBriefcase,
+  FaGlobe, FaFileUpload, FaCheck
 } from 'react-icons/fa';
 import Link from 'next/link';
 
-// Role configurations
 const ROLE_CONFIG: Record<string, {
   title: string;
   icon: any;
@@ -620,21 +620,21 @@ export default function OfficialDashboard() {
             <div className="flex gap-3 mb-4">
               <button
                 onClick={() => setActiveTab('assigned')}
-                className={`flex-1 px-6 py-4 rounded-xl font-bold text-lg transition-all duration-300 border-2 ${activeTab === 'assigned'
+                className={`flex-1 px-6 py-4 rounded-xl font-bold text-lg transition-all duration-300 border-2 flex items-center justify-center gap-2 ${activeTab === 'assigned'
                   ? 'bg-linear-to-r from-blue-500 to-cyan-500 text-white border-blue-400 shadow-lg shadow-blue-500/50'
                   : 'bg-white/5 text-blue-200 border-blue-500/30 hover:bg-white/10 hover:border-blue-500/50'
                   }`}
               >
-                📋 Assigned Applications ({assignedApplications.length})
+                <FaClipboardList className="text-xl" /> Assigned Applications ({assignedApplications.length})
               </button>
               <button
                 onClick={() => setActiveTab('all')}
-                className={`flex-1 px-6 py-4 rounded-xl font-bold text-lg transition-all duration-300 border-2 ${activeTab === 'all'
+                className={`flex-1 px-6 py-4 rounded-xl font-bold text-lg transition-all duration-300 border-2 flex items-center justify-center gap-2 ${activeTab === 'all'
                   ? 'bg-linear-to-r from-purple-500 to-pink-500 text-white border-purple-400 shadow-lg shadow-purple-500/50'
                   : 'bg-white/5 text-purple-200 border-purple-500/30 hover:bg-white/10 hover:border-purple-500/50'
                   }`}
               >
-                🌐 All Applications ({allApplications.length})
+                <FaGlobe className="text-xl" /> All Applications ({allApplications.length})
               </button>
             </div>
 
@@ -986,7 +986,7 @@ export default function OfficialDashboard() {
                   <div className="bg-linear-to-br from-cyan-500/5 to-teal-500/5 rounded-2xl p-6 border border-cyan-500/20">
                     <h4 className="text-lg font-bold text-cyan-300 mb-4 flex items-center gap-2">
                       <FaMapMarkedAlt />
-                      📍 Survey Data & Field Evidence
+                      Survey Data & Field Evidence
                     </h4>
 
                     {/* GPS Coordinates */}
@@ -1033,7 +1033,7 @@ export default function OfficialDashboard() {
 
                     {/* Boundary Map Upload */}
                     <div className="mb-6">
-                      <label className="text-sm font-semibold text-cyan-200 block mb-2">🗺️ Upload Boundary Map (PDF/JPEG/PNG)</label>
+                      <label className="text-sm font-semibold text-cyan-200 block mb-2">Upload Boundary Map (PDF/JPEG/PNG)</label>
                       <div className="relative">
                         <input
                           type="file"
@@ -1042,14 +1042,16 @@ export default function OfficialDashboard() {
                           className="w-full px-4 py-3 bg-slate-900/50 border border-cyan-500/20 rounded-lg text-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-cyan-500/20 file:text-cyan-200 hover:file:bg-cyan-500/30"
                         />
                         {boundaryMapFile && (
-                          <p className="mt-2 text-xs text-green-400">✅ {boundaryMapFile.name}</p>
+                          <p className="mt-2 text-xs text-green-400 flex items-center gap-1">
+                            <FaCheck /> {boundaryMapFile.name}
+                          </p>
                         )}
                       </div>
                     </div>
 
                     {/* Field Photos Upload */}
                     <div className="mb-6">
-                      <label className="text-sm font-semibold text-cyan-200 block mb-2">📷 Upload Field Photos (2-4 photos)</label>
+                      <label className="text-sm font-semibold text-cyan-200 block mb-2">Upload Field Photos (2-4 photos)</label>
                       <input
                         type="file"
                         accept="image/*"
@@ -1058,8 +1060,8 @@ export default function OfficialDashboard() {
                         className="w-full px-4 py-3 bg-slate-900/50 border border-cyan-500/20 rounded-lg text-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-cyan-500/20 file:text-cyan-200 hover:file:bg-cyan-500/30"
                       />
                       {fieldPhotoFiles.length > 0 && (
-                        <div className="mt-2 text-xs text-green-400">
-                          ✅ {fieldPhotoFiles.length} photo(s) selected: {fieldPhotoFiles.map(f => f.name).join(', ')}
+                        <div className="mt-2 text-xs text-green-400 flex items-center gap-1">
+                          <FaCheck /> {fieldPhotoFiles.length} photo(s) selected: {fieldPhotoFiles.map(f => f.name).join(', ')}
                         </div>
                       )}
                     </div>
@@ -1080,9 +1082,9 @@ export default function OfficialDashboard() {
                     <button
                       onClick={() => handleSurveyUpload(selectedApp._id)}
                       disabled={uploadingSurvey}
-                      className="w-full px-6 py-4 bg-linear-to-r from-cyan-500/20 to-teal-500/20 hover:from-cyan-500/30 hover:to-teal-500/30 text-cyan-200 hover:text-white rounded-xl font-bold transition-all border border-cyan-500/30 hover:border-cyan-500/50 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full px-6 py-4 bg-linear-to-r from-cyan-500/20 to-teal-500/20 hover:from-cyan-500/30 hover:to-teal-500/30 text-cyan-200 hover:text-white rounded-xl font-bold transition-all border border-cyan-500/30 hover:border-cyan-500/50 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
-                      {uploadingSurvey ? 'Uploading to IPFS...' : '📤 Upload Survey Data to Blockchain'}
+                      <FaFileUpload /> {uploadingSurvey ? 'Uploading to IPFS...' : 'Upload Survey Data to Blockchain'}
                     </button>
                   </div>
                 )}

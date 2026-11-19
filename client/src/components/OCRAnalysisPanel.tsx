@@ -1,209 +1,256 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { FaFileAlt, FaCheckCircle, FaExclamationTriangle, FaTimesCircle, FaSyncAlt, FaSearch, FaCheck, FaMicrochip } from 'react-icons/fa';
 
 interface OCRAnalysisPanelProps {
   application: {
-    ownerName: string;
-    surveyNumber: string;
-    area: string;
+    ownerName?: string;
+    fullName?: string;
+    surveyNumber?: string;
+    area?: string;
     aadharNumber?: string;
     ipfsHash?: string;
     receiptNumber: string;
+    ocrData?: any;
+    ocrMatch?: number;
   };
+}
+
+interface OCRField {
+  label: string;
+  expected: string;
+  extracted: string;
+  match: boolean;
+  confidence?: number;
 }
 
 interface OCRResult {
   confidence: number;
-  fields: {
-    label: string;
-    expected: string;
-    extracted: string;
-    match: boolean;
-  }[];
+  fields: OCRField[];
+  source?: string;
 }
 
 export default function OCRAnalysisPanel({ application }: OCRAnalysisPanelProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<OCRResult | null>(null);
   const [analyzed, setAnalyzed] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  // Check if OCR data is already available in the application record
+  useEffect(() => {
+    if (application?.ocrData || typeof application?.ocrMatch === 'number') {
+      const ocr = application.ocrData || {};
+      const expectedOwner = application.ownerName || application.fullName || 'N/A';
+      const extractedOwner = ocr.applicantName || ocr.extractedOwner || 'Not Found';
+      const expectedSurvey = application.surveyNumber || 'N/A';
+      const extractedSurvey = ocr.surveyNumber || ocr.extractedSurveyNo || 'Not Found';
+      const expectedArea = application.area || 'N/A';
+      const extractedArea = ocr.landArea || ocr.extractedArea || 'Not Found';
+      const expectedAadhar = application.aadharNumber || 'N/A';
+      const extractedAadhar = ocr.aadharNumber || 'Not Found';
+
+      const cleanStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const isOwnerMatch = extractedOwner !== 'Not Found' && (
+        cleanStr(expectedOwner) === cleanStr(extractedOwner) ||
+        cleanStr(expectedOwner).startsWith(cleanStr(extractedOwner)) ||
+        cleanStr(extractedOwner).startsWith(cleanStr(expectedOwner))
+      );
+
+      const isSurveyMatch = extractedSurvey !== 'Not Found' && cleanStr(expectedSurvey) === cleanStr(extractedSurvey);
+      const isAreaMatch = extractedArea !== 'Not Found' && (cleanStr(expectedArea) === cleanStr(extractedArea) || cleanStr(extractedArea).includes(cleanStr(expectedArea).replace(/[^0-9]/g, '')));
+      const isAadharMatch = extractedAadhar !== 'Not Found' && (
+        cleanStr(expectedAadhar) === cleanStr(extractedAadhar) ||
+        (extractedAadhar.includes('X') && cleanStr(expectedAadhar).slice(0, 4) === cleanStr(extractedAadhar).slice(0, 4))
+      );
+
+      const fields: OCRField[] = [
+        { label: 'Owner Name', expected: expectedOwner, extracted: extractedOwner, match: isOwnerMatch },
+        { label: 'Survey Number', expected: expectedSurvey, extracted: extractedSurvey, match: isSurveyMatch },
+        { label: 'Land Area', expected: expectedArea, extracted: extractedArea, match: isAreaMatch },
+        { label: 'Aadhaar / ID Verification', expected: expectedAadhar, extracted: extractedAadhar, match: isAadharMatch },
+      ];
+
+      const confidence = typeof application.ocrMatch === 'number'
+        ? application.ocrMatch
+        : Math.round((fields.filter(f => f.match).length / fields.length) * 100);
+
+      setResult({
+        confidence,
+        fields,
+        source: 'Verified Ledger Record'
+      });
+      setAnalyzed(true);
+    }
+  }, [application]);
 
   const runOCRAnalysis = async () => {
     setIsAnalyzing(true);
-    setResult(null);
+    setErrorMessage('');
 
-    // Simulate OCR processing time (2-3 seconds)
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    try {
+      const response = await fetch('/api/ocr/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receiptNumber: application.receiptNumber,
+          ipfsHash: application.ipfsHash,
+        }),
+      });
 
-    // Simulate OCR extracting data from uploaded document
-    // In real system: send document to OCR API and get back extracted fields
-    // Here we simulate high confidence match since document was uploaded by authority
-    const extractedFields = [
-      {
-        label: 'Owner Name',
-        expected: application.ownerName || 'N/A',
-        extracted: application.ownerName || 'N/A',
-        match: true,
-      },
-      {
-        label: 'Survey Number',
-        expected: application.surveyNumber || 'N/A',
-        extracted: application.surveyNumber || 'N/A',
-        match: true,
-      },
-      {
-        label: 'Land Area',
-        expected: application.area ? `${application.area} Acres` : 'N/A',
-        extracted: application.area ? `${application.area} Acres` : 'N/A',
-        match: true,
-      },
-      {
-        label: 'Aadhaar Number',
-        expected: application.aadharNumber || 'N/A',
-        extracted: application.aadharNumber || 'N/A',
-        match: true,
-      },
-    ];
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to analyze document');
+      }
 
-    // Calculate confidence based on matches
-    const matchCount = extractedFields.filter(f => f.match).length;
-    const baseConfidence = (matchCount / extractedFields.length) * 100;
-    // Add small random variation between 98.1 and 99.8
-    const confidence = parseFloat(
-      (baseConfidence - 1.9 + Math.random() * 1.7).toFixed(1)
-    );
-
-    setResult({
-      confidence: Math.min(99.8, Math.max(98.1, confidence)),
-      fields: extractedFields,
-    });
-    setAnalyzed(true);
-    setIsAnalyzing(false);
+      setResult({
+        confidence: data.confidence,
+        fields: data.fields,
+        source: data.source === 'document_ocr' ? 'Tesseract Neural OCR' : 'Cryptographic Ledger Record'
+      });
+      setAnalyzed(true);
+    } catch (err: any) {
+      console.error('OCR Error:', err);
+      setErrorMessage(err.message || 'OCR processing encountered an issue');
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const getConfidenceColor = (confidence: number) => {
-    if (confidence >= 98) return 'text-green-400';
-    if (confidence >= 85) return 'text-yellow-400';
-    return 'text-red-400';
+    if (confidence >= 85) return 'text-emerald-400';
+    if (confidence >= 65) return 'text-amber-400';
+    return 'text-rose-400';
   };
 
   const getProgressColor = (confidence: number) => {
-    if (confidence >= 98) return 'bg-green-400';
-    if (confidence >= 85) return 'bg-yellow-400';
-    return 'bg-red-400';
+    if (confidence >= 85) return 'bg-emerald-400';
+    if (confidence >= 65) return 'bg-amber-400';
+    return 'bg-rose-400';
   };
 
   const getConfidenceLabel = (confidence: number) => {
-    if (confidence >= 98) return '✅ HIGH CONFIDENCE — Document Verified';
-    if (confidence >= 85) return '⚠️ MEDIUM CONFIDENCE — Manual Review Needed';
-    return '❌ LOW CONFIDENCE — Document Mismatch';
+    if (confidence >= 85) return 'High Confidence — Document Symmetry Verified';
+    if (confidence >= 65) return 'Acceptable Symmetry — Minor Variation Detected';
+    return 'Low Confidence — Discrepancy Review Required';
   };
 
   return (
-    <div className="bg-slate-800/70 p-5 rounded-xl border border-purple-500/30">
+    <div className="bg-slate-900/60 backdrop-blur-md p-6 rounded-2xl border border-white/10 shadow-xl">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center text-xl">
-            🤖
+          <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/25 flex items-center justify-center text-purple-400">
+            <FaMicrochip className="text-lg" />
           </div>
           <div>
-            <h3 className="text-white font-bold text-lg">AI / OCR Analysis</h3>
-            <p className="text-purple-300 text-xs">
-              Automated document verification via OCR pipeline
+            <h3 className="text-white font-bold text-base">Optical Character Verification (M9)</h3>
+            <p className="text-slate-400 text-xs">
+              Automated document extraction and citizen declaration symmetry
             </p>
           </div>
         </div>
-        {!analyzed && (
+        {!analyzed ? (
           <button
             onClick={runOCRAnalysis}
             disabled={isAnalyzing}
-            className={`px-5 py-2.5 rounded-lg font-semibold text-sm transition-all ${
+            className={`px-4 py-2 rounded-xl font-medium text-xs transition-all flex items-center gap-2 ${
               isAnalyzing
                 ? 'bg-purple-500/10 text-purple-300 cursor-not-allowed'
-                : 'bg-purple-500/20 hover:bg-purple-500/40 text-purple-200 hover:text-white border border-purple-500/30'
+                : 'bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 hover:text-white border border-purple-500/40 shadow-lg'
             }`}
           >
-            {isAnalyzing ? '⏳ Analyzing...' : '▶ Run OCR Analysis'}
+            <FaSearch className="text-xs" />
+            <span>{isAnalyzing ? 'Extracting Text...' : 'Run OCR Verification'}</span>
           </button>
-        )}
-        {analyzed && (
+        ) : (
           <button
-            onClick={() => { setAnalyzed(false); setResult(null); }}
-            className="px-4 py-2 rounded-lg text-xs text-slate-400 hover:text-white border border-slate-600 hover:border-slate-400 transition-all"
+            onClick={runOCRAnalysis}
+            disabled={isAnalyzing}
+            className="px-3.5 py-1.5 rounded-xl text-xs font-medium text-purple-300 hover:text-white border border-purple-500/30 hover:border-purple-400 transition-all flex items-center gap-1.5 bg-purple-500/10"
           >
-            🔄 Re-run
+            <FaSyncAlt className={`text-xs ${isAnalyzing ? 'animate-spin' : ''}`} />
+            <span>{isAnalyzing ? 'Processing...' : 'Re-verify Document'}</span>
           </button>
         )}
       </div>
 
-      {/* Analyzing animation */}
+      {/* Analyzing status */}
       {isAnalyzing && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-3 text-purple-300 text-sm">
+        <div className="space-y-3 py-3">
+          <div className="flex items-center gap-3 text-purple-300 text-xs">
             <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
-            <span>Extracting text from document using OCR...</span>
+            <span>Processing document buffer through OCR engine...</span>
           </div>
-          <div className="w-full bg-slate-700 rounded-full h-1.5">
-            <div className="bg-purple-400 h-1.5 rounded-full animate-pulse" style={{ width: '60%' }} />
+          <div className="w-full bg-slate-800 rounded-full h-1.5">
+            <div className="bg-purple-400 h-1.5 rounded-full animate-pulse" style={{ width: '75%' }} />
           </div>
-          <div className="flex items-center gap-3 text-purple-300/60 text-sm">
-            <div className="w-4 h-4 border-2 border-purple-400/40 border-t-transparent rounded-full animate-spin" />
-            <span>Running NLP field extraction...</span>
-          </div>
-          <div className="flex items-center gap-3 text-purple-300/30 text-sm">
-            <div className="w-4 h-4 border-2 border-purple-400/20 rounded-full" />
-            <span>Comparing with application data...</span>
-          </div>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-300 text-xs mb-3">
+          {errorMessage}
         </div>
       )}
 
       {/* Results */}
       {result && !isAnalyzing && (
         <div className="space-y-4">
-
           {/* Confidence Score */}
-          <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="bg-slate-950/50 rounded-xl p-4 border border-white/5">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-slate-300 text-sm font-medium">
-                Confidence Score
-              </span>
-              <span className={`text-2xl font-bold ${getConfidenceColor(result.confidence)}`}>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-300 text-xs font-semibold uppercase tracking-wider">Field Symmetry Index</span>
+                {result.source && (
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">
+                    {result.source}
+                  </span>
+                )}
+              </div>
+              <span className={`text-xl font-bold ${getConfidenceColor(result.confidence)}`}>
                 {result.confidence}%
               </span>
             </div>
             {/* Progress bar */}
-            <div className="w-full bg-slate-700 rounded-full h-3 mb-2">
+            <div className="w-full bg-slate-800 rounded-full h-2 mb-2">
               <div
-                className={`h-3 rounded-full transition-all duration-1000 ${getProgressColor(result.confidence)}`}
-                style={{ width: `${result.confidence}%` }}
+                className={`h-2 rounded-full transition-all duration-700 ${getProgressColor(result.confidence)}`}
+                style={{ width: `${Math.min(100, Math.max(0, result.confidence))}%` }}
               />
             </div>
-            <p className={`text-xs font-semibold ${getConfidenceColor(result.confidence)}`}>
-              {getConfidenceLabel(result.confidence)}
+            <p className={`text-xs font-medium flex items-center gap-1.5 ${getConfidenceColor(result.confidence)}`}>
+              {result.confidence >= 85 ? (
+                <FaCheckCircle className="text-xs shrink-0" />
+              ) : (
+                <FaExclamationTriangle className="text-xs shrink-0" />
+              )}
+              <span>{getConfidenceLabel(result.confidence)}</span>
             </p>
           </div>
 
           {/* Field by Field comparison */}
           <div className="space-y-2">
             <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold">
-              Extracted Fields vs Application Data
+              Extracted Document Text vs Application Declaration
             </p>
             {result.fields.map((field, idx) => (
               <div
                 key={idx}
-                className={`flex items-center justify-between p-3 rounded-lg border ${
+                className={`flex items-center justify-between p-3 rounded-xl border ${
                   field.match
-                    ? 'bg-green-500/5 border-green-500/20'
-                    : 'bg-red-500/5 border-red-500/20'
+                    ? 'bg-emerald-500/5 border-emerald-500/20'
+                    : 'bg-amber-500/5 border-amber-500/20'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-lg">
-                    {field.match ? '✅' : '❌'}
-                  </span>
+                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs ${
+                    field.match ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+                  }`}>
+                    {field.match ? <FaCheck /> : <FaExclamationTriangle />}
+                  </div>
                   <div>
-                    <p className="text-slate-300 text-xs font-medium uppercase tracking-wider">
+                    <p className="text-slate-400 text-[11px] font-medium uppercase tracking-wider">
                       {field.label}
                     </p>
                     <p className="text-white text-sm font-semibold">
@@ -212,8 +259,8 @@ export default function OCRAnalysisPanel({ application }: OCRAnalysisPanelProps)
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-slate-500">Expected</p>
-                  <p className={`text-xs font-medium ${field.match ? 'text-green-400' : 'text-red-400'}`}>
+                  <p className="text-[10px] text-slate-500 uppercase">Declared Record</p>
+                  <p className={`text-xs font-semibold ${field.match ? 'text-emerald-400' : 'text-amber-400'}`}>
                     {field.expected}
                   </p>
                 </div>
@@ -222,33 +269,30 @@ export default function OCRAnalysisPanel({ application }: OCRAnalysisPanelProps)
           </div>
 
           {/* OCR Summary */}
-          <div className={`rounded-lg p-3 border text-sm ${
-            result.confidence >= 98
-              ? 'bg-green-500/10 border-green-500/20 text-green-300'
-              : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-300'
+          <div className={`rounded-xl p-3.5 border text-xs leading-relaxed ${
+            result.confidence >= 85
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200'
+              : 'bg-amber-500/10 border-amber-500/20 text-amber-200'
           }`}>
-            <p className="font-semibold mb-1">
-              🔍 OCR Analysis Summary
+            <p className="font-semibold mb-1 flex items-center gap-1.5">
+              <FaFileAlt className="text-xs" />
+              <span>Verification Audit Trail</span>
             </p>
-            <p className="text-xs opacity-80">
-              {result.fields.filter(f => f.match).length} of {result.fields.length} fields
-              matched between uploaded document and application data.
-              {result.confidence >= 98
-                ? ' Document is verified and authentic. Safe to proceed.'
-                : ' Some fields need manual verification before proceeding.'}
+            <p className="opacity-90">
+              {result.fields.filter(f => f.match).length} of {result.fields.length} critical fields verified.
+              {result.confidence >= 85
+                ? ' Extracted document text matches application metadata within tolerance threshold.'
+                : ' Minor naming variation detected between physical document and citizen portal entry (e.g. initial or honorific).'}
             </p>
           </div>
-
         </div>
       )}
 
       {/* Default state */}
       {!isAnalyzing && !analyzed && (
-        <div className="text-center py-4 text-slate-500 text-sm">
-          <p>🔍 Click "Run OCR Analysis" to verify document authenticity</p>
-          <p className="text-xs mt-1 text-slate-600">
-            AI will extract and compare fields from uploaded documents
-          </p>
+        <div className="text-center py-6 text-slate-400 text-xs flex flex-col items-center gap-2">
+          <FaSearch className="text-slate-500 text-lg" />
+          <p>Click "Run OCR Verification" to extract and compare document fields against official records</p>
         </div>
       )}
     </div>

@@ -78,7 +78,7 @@ const MinistryWelfareFields = forwardRef<MinistryWelfareFieldsHandle, any>(
     <div className="bg-white/10 backdrop-blur-lg rounded-2xl border border-pink-500/20 p-6 mb-6">
       <h2 className="text-xl font-bold text-pink-300 mb-4 flex items-center gap-2">
         <FaCheckCircle />
-        🏛️ Ministry of Welfare - Final Approval
+        Ministry of Welfare - Final Approval
       </h2>
 
       {/* Publish Policies or Guidelines */}
@@ -90,9 +90,9 @@ const MinistryWelfareFields = forwardRef<MinistryWelfareFieldsHandle, any>(
           className="w-full px-4 py-3 bg-slate-900/50 border border-pink-500/20 rounded-lg text-white mb-3"
         >
           <option value="">Select Policy Type</option>
-          <option value="welfare_policy">🏛️ New Welfare Policy</option>
-          <option value="land_support_guideline">📋 Land Support Guideline</option>
-          <option value="circular">📢 Circular</option>
+          <option value="welfare_policy">New Welfare Policy</option>
+          <option value="land_support_guideline">Land Support Guideline</option>
+          <option value="circular">Circular</option>
         </select>
         <label className="text-sm text-pink-300/70 mb-2 flex items-center gap-2">
           <FaFileUpload />
@@ -105,7 +105,7 @@ const MinistryWelfareFields = forwardRef<MinistryWelfareFieldsHandle, any>(
           className="w-full px-4 py-3 bg-slate-900/50 border border-pink-500/20 rounded-lg text-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-pink-500/20 file:text-pink-200"
         />
         {policyFile && (
-          <p className="mt-2 text-sm text-green-400">✅ {policyFile.name}</p>
+          <p className="mt-2 text-sm text-green-400">{policyFile.name}</p>
         )}
       </div>
 
@@ -119,9 +119,9 @@ const MinistryWelfareFields = forwardRef<MinistryWelfareFieldsHandle, any>(
           className="w-full px-4 py-3 bg-slate-900/50 border border-pink-500/20 rounded-lg text-white mb-3"
         >
           <option value="">Select Eligibility</option>
-          <option value="eligible">✅ Eligible for Welfare Scheme</option>
-          <option value="not_eligible">❌ Not Eligible</option>
-          <option value="conditional">⚠️ Conditionally Eligible</option>
+          <option value="eligible">Eligible for Welfare Scheme</option>
+          <option value="not_eligible">Not Eligible</option>
+          <option value="conditional">Conditionally Eligible</option>
         </select>
         <textarea
           value={eligibilityNote}
@@ -134,7 +134,7 @@ const MinistryWelfareFields = forwardRef<MinistryWelfareFieldsHandle, any>(
 
       <div className="bg-pink-500/10 border border-pink-500/20 rounded-lg p-4">
         <p className="text-sm text-pink-200">
-          💡 <strong>Data will be saved automatically when you click "Approve & Forward"</strong>
+          <strong>Data will be saved automatically when you click "Approve & Forward"</strong>
         </p>
       </div>
     </div>

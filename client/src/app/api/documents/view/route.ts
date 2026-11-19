@@ -146,7 +146,7 @@ export async function GET(request: NextRequest) {
         console.log('Found land request:', landRequest.receiptNumber);
 
         if (landRequest.pattaHtmlContent) {
-          console.log(`✅ Found HTML content in MongoDB (${landRequest.pattaHtmlContent.length} bytes)`);
+          console.log(`[DocumentView] Found HTML content in MongoDB (${landRequest.pattaHtmlContent.length} bytes)`);
 
           if (isPrint) {
             // Generate PDF from HTML
@@ -204,7 +204,7 @@ export async function GET(request: NextRequest) {
 
               console.log('PDF generated successfully, size:', pdfBuffer.length, 'bytes');
 
-              return new NextResponse(pdfBuffer, {
+              return new NextResponse(pdfBuffer as any, {
                 headers: {
                   'Content-Type': 'application/pdf',
                   'Content-Disposition': `attachment; filename="patta-${landRequest.certificateNumber || ipfsHash}.pdf"`,
@@ -263,7 +263,7 @@ export async function GET(request: NextRequest) {
       const buffer = await fetchFromPublicGateway(dedicatedGatewayUrl);
 
       if (buffer && buffer.length > 0) {
-        console.log(`✅ Successfully fetched from dedicated gateway (${buffer.length} bytes)`);
+        console.log(`[DocumentView] Successfully fetched from dedicated gateway (${buffer.length} bytes)`);
 
         // Detect content type based on buffer content
         let contentType = 'application/pdf'; // Default for user-uploaded documents
@@ -303,7 +303,7 @@ export async function GET(request: NextRequest) {
         const buffer = await fetchFromPublicGateway(gateway.url);
 
         if (buffer && buffer.length > 0) {
-          console.log(`✅ Successfully fetched from ${gateway.name} (${buffer.length} bytes)`);
+          console.log(`[DocumentView] Successfully fetched from ${gateway.name} (${buffer.length} bytes)`);
 
           return new NextResponse(new Uint8Array(buffer), {
             headers: {
@@ -315,36 +315,15 @@ export async function GET(request: NextRequest) {
           });
         }
       } catch (error) {
-        console.error(`❌ ${gateway.name} failed:`, error instanceof Error ? error.message : String(error));
+        console.error(`[DocumentView] ${gateway.name} failed:`, error instanceof Error ? error.message : String(error));
         continue;
       }
     }
 
-    console.error('All IPFS retrieval methods failed. Falling back to local sample for demonstration.');
-
-    // Fallback to local sample image for Demo purposes
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const samplePath = path.resolve(process.cwd(), 'public', 'sample-land-document.png');
-
-      if (fs.existsSync(samplePath)) {
-        const buffer = fs.readFileSync(samplePath);
-        return new NextResponse(buffer, {
-          headers: {
-            'Content-Type': 'image/png',
-            'Content-Disposition': 'inline; filename="sample-land-document.png"',
-            'Cache-Control': 'no-store, must-revalidate',
-          },
-        });
-      }
-    } catch (fallbackError) {
-      console.error('Local fallback also failed:', fallbackError);
-    }
-
+    console.warn('[DocumentView] All IPFS retrieval gateways returned empty or unreachable.');
     return NextResponse.json(
-      { message: 'Failed to fetch document from IPFS. The document may not be available or requires different access permissions.' },
-      { status: 503 }
+      { message: 'Document not found on IPFS cluster or gateways are temporarily unreachable.' },
+      { status: 404 }
     );
   } catch (error) {
     console.error('Error:', error);

@@ -82,6 +82,11 @@ export interface ILandRequest extends Document {
   sentTo?: string;
   dueOn?: Date;
 
+  // AI Verification & Trust Metrics
+  trustScore?: number;
+  ocrMatch?: any;
+  ocrData?: any;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -238,6 +243,10 @@ const landRequestSchema = new Schema<ILandRequest>(
     subject: String,
     sentTo: String,
     dueOn: Date,
+    // AI Verification & Trust Metrics
+    trustScore: Number,
+    ocrMatch: Schema.Types.Mixed,
+    ocrData: Schema.Types.Mixed,
   },
   {
     timestamps: true,

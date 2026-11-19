@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { FaClock, FaCheckCircle, FaTimesCircle, FaDatabase, FaArrowRight, FaImage, FaFile, FaChevronDown, FaChevronUp } from 'react-icons/fa';
+import { FaClock, FaCheckCircle, FaTimesCircle, FaDatabase, FaArrowRight, FaImage, FaFile, FaChevronDown, FaChevronUp, FaKey, FaExternalLinkAlt, FaPaperclip, FaClipboardList } from 'react-icons/fa';
 
 interface HistoryEntry {
   transactionId?: string;
@@ -138,8 +138,8 @@ export default function ApplicationHistory({ history }: ApplicationHistoryProps)
       {/* Header with Toggle Button */}
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-bold text-indigo-300 flex items-center gap-2">
-          <FaClock />
-          📜 Application Timeline ({history.length} {history.length === 1 ? 'Action' : 'Actions'})
+          <FaClock className="text-indigo-400" />
+          <span>Application Timeline ({history.length} {history.length === 1 ? 'Action' : 'Actions'})</span>
         </h2>
         <button
           onClick={() => setIsTimelineOpen(!isTimelineOpen)}
@@ -186,8 +186,9 @@ export default function ApplicationHistory({ history }: ApplicationHistoryProps)
                     </div>
                     <div className="text-right">
                       {entry.transactionId && (
-                        <p className="text-xs text-purple-300 font-mono mb-1">
-                          🔑 TX: {entry.transactionId.substring(0, 16)}...
+                        <p className="text-xs text-purple-300 font-mono mb-1 flex items-center justify-end gap-1">
+                          <FaKey className="text-[10px]" />
+                          <span>TX: {entry.transactionId.substring(0, 16)}...</span>
                         </p>
                       )}
                       <span className="text-xs text-gray-400">
@@ -213,8 +214,9 @@ export default function ApplicationHistory({ history }: ApplicationHistoryProps)
                   {/* Display uploaded documents if present */}
                   {entry.documents && entry.documents.length > 0 && (
                     <details className="mt-3" open>
-                      <summary className="text-sm text-green-300 cursor-pointer hover:text-green-200 font-semibold mb-2">
-                        📎 Documents ({entry.documents.length} file{entry.documents.length !== 1 ? 's' : ''})
+                      <summary className="text-sm text-green-300 cursor-pointer hover:text-green-200 font-semibold mb-2 flex items-center gap-1.5">
+                        <FaPaperclip className="text-xs" />
+                        <span>Documents ({entry.documents.length} file{entry.documents.length !== 1 ? 's' : ''})</span>
                       </summary>
                       <div className="mt-2 space-y-2">
                         {entry.documents.map((doc, idx) => (
@@ -238,7 +240,10 @@ export default function ApplicationHistory({ history }: ApplicationHistoryProps)
                                 {doc.fileType.toUpperCase()} • {doc.size ? `${(doc.size / 1024).toFixed(2)} KB` : 'Size unknown'}
                               </p>
                             </div>
-                            <div className="text-gray-500 text-xs shrink-0">IPFS ↗</div>
+                            <div className="text-gray-500 text-xs shrink-0 flex items-center gap-1">
+                              <span>IPFS</span>
+                              <FaExternalLinkAlt className="text-[10px]" />
+                            </div>
                           </a>
                         ))}
                       </div>
@@ -248,8 +253,9 @@ export default function ApplicationHistory({ history }: ApplicationHistoryProps)
                   {/* Display role-specific data if present */}
                   {entry.data && Object.keys(entry.data).length > 0 && (
                     <details className="mt-3" open>
-                      <summary className="text-sm text-indigo-300 cursor-pointer hover:text-indigo-200 font-semibold mb-2">
-                        📋 Data Added ({Object.keys(entry.data).length} fields)
+                      <summary className="text-sm text-indigo-300 cursor-pointer hover:text-indigo-200 font-semibold mb-2 flex items-center gap-1.5">
+                        <FaClipboardList className="text-xs" />
+                        <span>Verification Data ({Object.keys(entry.data).length} fields)</span>
                       </summary>
                       <div className="mt-2 p-3 bg-slate-900/50 rounded-lg border border-slate-700/50">
                         {Object.entries(entry.data).map(([key, value]) => renderDataField(key, value))}

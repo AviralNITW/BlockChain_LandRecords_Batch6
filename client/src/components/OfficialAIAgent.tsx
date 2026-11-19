@@ -1,26 +1,21 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-
-/**
- * OfficialAIAgent — Chatbot for Officials
- * 
- * A conversational AI assistant that helps officials (Clerk, Superintendent,
- * MRO, Collector, etc.) quickly understand an application without manually
- * scrolling through multiple screens.
- * 
- * It summarizes: trust score, OCR match/mismatch, verification history,
- * recorded application details, process guidance, and role-specific checklists.
- * 
- * HOW IT WORKS:
- *   1. The component receives the full `application` object (already loaded by dashboard)
- *   2. When user asks a question, it POSTs { receiptNumber, question }
- *      to /api/ai-agent/summarize
- *   3. The API routes the question to the right analysis generator
- *   4. The API authenticates the official and reads current application data
- * 
- * This assistant is read-only and cannot invoke workflow actions.
- */
+import DOMPurify from 'dompurify';
+import {
+  FaRobot,
+  FaFileAlt,
+  FaShieldAlt,
+  FaMicrochip,
+  FaClock,
+  FaPaperclip,
+  FaExternalLinkAlt,
+  FaArrowRight,
+  FaCheckCircle,
+  FaTimes,
+  FaChevronUp,
+  FaChevronDown,
+} from 'react-icons/fa';
 
 interface Message {
   id: string;
@@ -39,23 +34,21 @@ interface OfficialAIAgentProps {
 }
 
 const QUICK_ACTIONS = [
-  { label: '📋 Full Summary', question: 'Give me a complete summary of this application', icon: '📋' },
-  { label: '📊 Trust Score', question: 'Analyze the trust score for this application', icon: '📊' },
-  { label: '🔍 OCR Analysis', question: 'Show me the OCR match/mismatch analysis', icon: '🔍' },
-  { label: '📜 History', question: 'Show the verification history timeline', icon: '📜' },
-  { label: '📄 Required documents', question: 'Which documents are required?', icon: '📄' },
-  { label: '🔗 DigiLocker', question: 'How does the applicant link DigiLocker?', icon: '🔗' },
-  { label: '➡️ Process steps', question: 'Explain the process and next step', icon: '➡️' },
-  { label: '🎯 What should I do?', question: 'What do you recommend I do with this application?', icon: '🎯' },
+  { label: 'Full Summary', question: 'Give me a complete summary of this application', icon: FaFileAlt },
+  { label: 'Trust Score', question: 'Analyze the trust score for this application', icon: FaShieldAlt },
+  { label: 'OCR Analysis', question: 'Show me the OCR match/mismatch analysis', icon: FaMicrochip },
+  { label: 'History Timeline', question: 'Show the verification history timeline', icon: FaClock },
+  { label: 'Required Documents', question: 'Which documents are required?', icon: FaPaperclip },
+  { label: 'DigiLocker Verification', question: 'How does the applicant link DigiLocker?', icon: FaExternalLinkAlt },
+  { label: 'Workflow Guidance', question: 'Explain the process and next step', icon: FaArrowRight },
+  { label: 'Role Checklist', question: 'What do you recommend I do with this application?', icon: FaCheckCircle },
 ];
 
-// Renders markdown-like text to HTML for chat bubbles
 function renderMarkdown(text: string): string {
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    // Tables — convert markdown tables to HTML
     .replace(/\|(.+)\|\n\|[-| ]+\|\n((?:\|.+\|\n?)*)/g, (_, header, body) => {
       const headers = header.split('|').filter((h: string) => h.trim()).map((h: string) =>
         `<th class="px-3 py-1.5 text-left text-xs font-semibold text-blue-300 uppercase tracking-wider border-b border-white/10">${h.trim()}</th>`
@@ -68,22 +61,14 @@ function renderMarkdown(text: string): string {
       }).join('');
       return `<div class="overflow-x-auto my-3"><table class="w-full"><thead><tr class="bg-white/5">${headers}</tr></thead><tbody>${rows}</tbody></table></div>`;
     })
-    // Headers
-    .replace(/^### (.+)$/gm, '<h4 class="text-sm font-bold text-blue-300 mt-4 mb-2 flex items-center gap-2">$1</h4>')
+    .replace(/^### (.+)$/gm, '<h4 class="text-sm font-bold text-amber-300 mt-4 mb-2 flex items-center gap-2">$1</h4>')
     .replace(/^## (.+)$/gm, '<h3 class="text-base font-bold text-white mt-3 mb-2">$1</h3>')
-    // Blockquotes
-    .replace(/^> (.+)$/gm, '<div class="border-l-2 border-blue-500/50 pl-3 my-2 text-sm text-blue-200/80 italic">$1</div>')
-    // Bold
+    .replace(/^> (.+)$/gm, '<div class="border-l-2 border-amber-500/50 pl-3 my-2 text-sm text-amber-200/80 italic">$1</div>')
     .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>')
-    // Italic
     .replace(/_"(.+?)"_/g, '<em class="text-slate-400">"$1"</em>')
-    // Inline code
     .replace(/`(.+?)`/g, '<code class="px-1 py-0.5 bg-white/10 rounded text-[11px] font-mono text-emerald-300">$1</code>')
-    // Horizontal rules
     .replace(/^---$/gm, '<hr class="border-white/10 my-3" />')
-    // List items with dash
-    .replace(/^- (.+)$/gm, '<div class="flex gap-2 ml-1 my-0.5"><span class="text-blue-400 shrink-0 text-xs mt-0.5">•</span><span class="text-sm">$1</span></div>')
-    // Line breaks
+    .replace(/^- (.+)$/gm, '<div class="flex gap-2 ml-1 my-0.5"><span class="text-amber-400 shrink-0 text-xs mt-0.5">•</span><span class="text-sm">$1</span></div>')
     .replace(/\n/g, '<br />');
 }
 
@@ -95,21 +80,19 @@ export default function OfficialAIAgent({ application, officialDesignation, offi
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-scroll to bottom when messages change
   useEffect(() => {
     if (!isMinimized) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isMinimized]);
 
-  // Welcome message
   useEffect(() => {
     if (isVisible && messages.length === 0) {
-      const applicantName = application?.fullName || application?.ownerName || 'Unknown';
+      const applicantName = application?.fullName || application?.ownerName || 'Citizen Applicant';
       setMessages([{
         id: 'welcome',
         role: 'system',
-        content: `🤖 **Read-only assistant** — Hello, ${officialName}!\n\nI can summarize application **${application?.receiptNumber || 'N/A'}** for **${applicantName}**, explain the recorded trust indicators and history, and answer process and DigiLocker questions. OCR results are reported only when recorded.\n\nUse the quick actions or ask a question. I cannot submit, verify, forward, approve, reject, or change records.`,
+        content: `**Application Intelligence Assistant** — Officer: ${officialName} (${officialDesignation})\n\nContext loaded for Record **${application?.receiptNumber || 'N/A'}** (${applicantName}).\n\nI can verify multi-signature endorsements, summarize trust index telemetry, explain field symmetry, and outline departmental workflow guidelines.\n\nSelect a quick action below or enter an inquiry.`,
         timestamp: new Date(),
       }]);
     }
@@ -128,7 +111,7 @@ export default function OfficialAIAgent({ application, officialDesignation, offi
     const loadingMsg: Message = {
       id: `loading-${Date.now()}`,
       role: 'agent',
-      content: '',
+      content: 'Analyzing record parameters...',
       timestamp: new Date(),
       isLoading: true,
     };
@@ -147,30 +130,33 @@ export default function OfficialAIAgent({ application, officialDesignation, offi
       const data = await response.json();
 
       setMessages(prev => {
-        const filtered = prev.filter(m => m.id !== loadingMsg.id);
-        return [...filtered, {
+        const withoutLoading = prev.filter(m => !m.isLoading);
+        const agentContent = response.ok && data.response
+          ? data.response
+          : `Error: ${data.error || 'Failed to generate explanation.'}`;
+
+        return [...withoutLoading, {
           id: `agent-${Date.now()}`,
-          role: 'agent' as const,
-          content: data.success
-            ? data.response
-            : `❌ ${data.error || 'Failed to generate response.'}`,
+          role: 'agent',
+          content: agentContent,
           timestamp: new Date(),
         }];
       });
     } catch {
       setMessages(prev => {
-        const filtered = prev.filter(m => m.id !== loadingMsg.id);
-        return [...filtered, {
-          id: `error-${Date.now()}`,
-          role: 'agent' as const,
-          content: '❌ **Connection Error.** Could not reach the AI Agent API. Please try again.',
+        const withoutLoading = prev.filter(m => !m.isLoading);
+        return [...withoutLoading, {
+          id: `agent-${Date.now()}`,
+          role: 'agent',
+          content: 'Connection Error: Unable to communicate with application explainability service.',
           timestamp: new Date(),
         }];
       });
     } finally {
       setIsQuerying(false);
+      setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [application, officialDesignation, isQuerying]);
+  }, [isQuerying, application]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -180,80 +166,77 @@ export default function OfficialAIAgent({ application, officialDesignation, offi
   if (!isVisible) return null;
 
   return (
-    <div className={`relative bg-slate-900/95 backdrop-blur-xl rounded-2xl border border-amber-500/20 shadow-2xl shadow-amber-900/10 flex flex-col transition-all duration-300 ${isMinimized ? 'h-14' : ''}`}
+    <div className={`relative bg-slate-900/95 backdrop-blur-xl rounded-2xl border border-amber-500/30 shadow-2xl flex flex-col transition-all duration-300 ${isMinimized ? 'h-14' : ''}`}
       style={{ maxHeight: isMinimized ? '56px' : '720px' }}
     >
-      {/* ── Header ──────────────────────────────────────────────────── */}
+      {/* Header */}
       <div
-        className="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-gradient-to-r from-amber-600/10 to-orange-600/10 rounded-t-2xl cursor-pointer select-none"
+        className="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-linear-to-r from-amber-600/15 to-orange-600/15 rounded-t-2xl cursor-pointer select-none"
         onClick={() => setIsMinimized(!isMinimized)}
       >
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/30">
-              <span className="text-base">🤖</span>
+            <div className="w-8 h-8 rounded-xl bg-linear-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/20 text-white">
+              <FaRobot className="text-sm" />
             </div>
-            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-slate-900 animate-pulse" />
+            <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full border border-slate-900 animate-pulse" />
           </div>
           <div>
-            <h3 className="text-white font-bold text-sm">Read-only Application Assistant</h3>
-            <p className="text-amber-300/60 text-[11px]">{officialDesignation} · {application?.receiptNumber || 'N/A'}</p>
+            <h3 className="text-white font-bold text-sm">Official Record Assistant</h3>
+            <p className="text-amber-300/70 text-[11px] font-mono">{officialDesignation} • {application?.receiptNumber || 'N/A'}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {/* Message count badge */}
           {messages.length > 1 && (
-            <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full">
+            <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-medium">
               {messages.length - 1} msg{messages.length > 2 ? 's' : ''}
             </span>
           )}
-          {/* Minimize / Expand */}
           <button
-            className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all text-xs"
+            className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all text-xs"
             onClick={(e) => { e.stopPropagation(); setIsMinimized(!isMinimized); }}
+            title={isMinimized ? 'Expand' : 'Minimize'}
           >
-            {isMinimized ? '▲' : '▼'}
+            {isMinimized ? <FaChevronUp size={10} /> : <FaChevronDown size={10} />}
           </button>
           {onClose && (
             <button
               onClick={(e) => { e.stopPropagation(); onClose(); }}
-              className="w-7 h-7 rounded-lg bg-white/5 hover:bg-red-500/20 flex items-center justify-center text-white/50 hover:text-red-300 transition-all text-xs"
+              className="w-7 h-7 rounded-lg bg-white/5 hover:bg-rose-500/20 flex items-center justify-center text-white/60 hover:text-rose-300 transition-all text-xs"
+              title="Close"
             >
-              ✕
+              <FaTimes size={10} />
             </button>
           )}
         </div>
       </div>
 
-      {/* ── Body (hidden when minimized) ────────────────────────────── */}
+      {/* Body */}
       {!isMinimized && (
         <>
-          {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[180px] max-h-[420px]"
             style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.08) transparent' }}
           >
             {messages.map(message => (
               <div
                 key={message.id}
-                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-200`}
+                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in duration-200`}
               >
                 <div
                   className={`max-w-[88%] rounded-2xl px-4 py-3 ${
                     message.role === 'user'
                       ? 'bg-amber-600/20 border border-amber-500/30 text-amber-100'
                       : message.role === 'system'
-                      ? 'bg-slate-800/80 border border-slate-600/30 text-slate-200'
-                      : 'bg-white/[0.03] border border-white/10 text-slate-200'
+                      ? 'bg-slate-800/80 border border-slate-700/50 text-slate-200'
+                      : 'bg-white/[0.04] border border-white/10 text-slate-200'
                   }`}
                 >
-                  {/* Role badge */}
                   <div className={`text-[10px] uppercase tracking-widest font-bold mb-1.5 ${
-                    message.role === 'user' ? 'text-amber-400/60' : message.role === 'system' ? 'text-blue-400/60' : 'text-emerald-400/60'
+                    message.role === 'user' ? 'text-amber-400/80' : message.role === 'system' ? 'text-blue-400/80' : 'text-emerald-400/80'
                   }`}>
-                    {message.role === 'user' ? officialDesignation : message.role === 'system' ? 'AI Assistant' : 'AI Agent'}
+                    {message.role === 'user' ? officialDesignation : message.role === 'system' ? 'System Verification' : 'Intelligence Engine'}
                   </div>
 
-                  {/* Loading dots */}
                   {message.isLoading ? (
                     <div className="flex items-center gap-3 py-2">
                       <div className="flex gap-1">
@@ -261,17 +244,18 @@ export default function OfficialAIAgent({ application, officialDesignation, offi
                         <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                         <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                       </div>
-                      <span className="text-sm text-amber-300/60 italic">Analyzing application data...</span>
+                      <span className="text-xs text-amber-300/70 italic">Analyzing application telemetry...</span>
                     </div>
                   ) : (
                     <div
                       className="text-[13px] leading-relaxed"
-                      dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+                      dangerouslySetInnerHTML={{
+                        __html: typeof window !== 'undefined' ? DOMPurify.sanitize(renderMarkdown(message.content)) : renderMarkdown(message.content)
+                      }}
                     />
                   )}
 
-                  {/* Timestamp */}
-                  <div className="text-[10px] text-white/15 mt-2">
+                  <div className="text-[10px] text-white/20 mt-2 font-mono">
                     {message.timestamp.toLocaleTimeString()}
                   </div>
                 </div>
@@ -280,23 +264,28 @@ export default function OfficialAIAgent({ application, officialDesignation, offi
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="px-4 py-2 text-xs text-amber-200/70 bg-amber-500/5 border-t border-white/5">
-            Read only: this assistant cannot submit, verify, forward, approve, reject, or change application records.
+          <div className="px-4 py-2 text-[11px] text-amber-200/80 bg-amber-500/5 border-t border-white/5 flex items-center gap-1.5">
+            <FaShieldAlt className="text-amber-400/80 shrink-0 text-xs" />
+            <span>Read-only compliance mode: this assistant provides record analysis and does not alter ledger state.</span>
           </div>
 
           {/* Quick Actions */}
           <div className="px-4 py-2 border-t border-white/5">
             <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-              {QUICK_ACTIONS.map((action, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleSendMessage(action.question)}
-                  disabled={isQuerying}
-                  className="shrink-0 px-2.5 py-1.5 rounded-lg bg-white/[0.03] hover:bg-amber-500/15 border border-white/8 hover:border-amber-500/30 text-[11px] text-white/60 hover:text-amber-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {action.label}
-                </button>
-              ))}
+              {QUICK_ACTIONS.map((action, i) => {
+                const IconComponent = action.icon;
+                return (
+                  <button
+                    key={i}
+                    onClick={() => handleSendMessage(action.question)}
+                    disabled={isQuerying}
+                    className="shrink-0 px-2.5 py-1.5 rounded-lg bg-white/[0.03] hover:bg-amber-500/15 border border-white/10 hover:border-amber-500/30 text-[11px] text-white/70 hover:text-amber-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  >
+                    <IconComponent className="text-[10px]" />
+                    <span>{action.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -308,18 +297,17 @@ export default function OfficialAIAgent({ application, officialDesignation, offi
                 type="text"
                 value={input}
                 onChange={e => setInput(e.target.value)}
-                placeholder="Ask about this application..."
+                placeholder="Inquire regarding records, endorsements, or checklists..."
+                maxLength={500}
                 disabled={isQuerying}
-                className="flex-1 bg-white/5 border border-white/10 focus:border-amber-500/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/25 outline-none transition-all disabled:opacity-40"
+                className="flex-1 bg-white/5 border border-white/10 focus:border-amber-500/50 rounded-xl px-4 py-2 text-xs text-white placeholder-white/30 outline-none transition-all disabled:opacity-40"
               />
               <button
                 type="submit"
                 disabled={isQuerying || !input.trim()}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-semibold text-sm shadow-lg shadow-amber-500/20 transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
+                className="px-4 py-2 rounded-xl bg-linear-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-medium text-xs shadow-lg shadow-amber-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {isQuerying ? (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
-                ) : 'Ask'}
+                {isQuerying ? 'Processing...' : 'Send'}
               </button>
             </div>
           </form>
